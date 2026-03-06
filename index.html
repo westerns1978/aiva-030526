@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Aiva - Intelligent Virtual Assistant</title>
+    
+    <meta name="theme-color" content="#0d9488">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Aiva">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/manifest.json">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root {
+        --bg-primary: #f8fafc;
+        --surface-glass: rgba(255, 255, 255, 0.8);
+        --text-main: #0f172a;
+        --border-subtle: rgba(0, 0, 0, 0.05);
+        --sidebar-bg: #0f172a;
+        --accent-teal: #0d9488;
+        --accent-cyan: #06b6d4;
+      }
+
+      .dark {
+        --bg-primary: #020617;
+        --surface-glass: rgba(15, 23, 42, 0.6);
+        --text-main: #f1f5f9;
+        --border-subtle: rgba(255, 255, 255, 0.06);
+        --sidebar-bg: #0f172a;
+      }
+
+      *, *::before, *::after {
+        transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+      }
+
+      html, body {
+        overscroll-behavior-y: contain;
+      }
+
+      html, body, #root {
+        min-height: 100vh;
+        overflow-y: auto;
+      }
+
+      body {
+        background-color: var(--bg-primary);
+        color: var(--text-main);
+        overscroll-behavior-y: none;
+        font-family: 'Inter', sans-serif;
+      }
+
+      .glass-panel {
+        background: var(--surface-glass);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border: 1px solid var(--border-subtle);
+      }
+
+      .mesh-bg {
+        background: radial-gradient(at 0% 0%, rgba(13, 148, 136, 0.15) 0px, transparent 50%),
+                    radial-gradient(at 100% 0%, rgba(6, 182, 212, 0.1) 0px, transparent 50%),
+                    radial-gradient(at 100% 100%, rgba(15, 23, 42, 0.1) 0px, transparent 50%);
+      }
+
+      .copilot-scrollbar::-webkit-scrollbar { width: 4px; }
+      .copilot-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .copilot-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(148, 163, 184, 0.2); border-radius: 20px; }
+      
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+      }
+
+      .animate-float {
+        animation: float 6s ease-in-out infinite;
+      }
+
+      @keyframes slide-in-right {
+        from { transform: translateX(100%); }
+        to { transform: translateX(0); }
+      }
+
+      .animate-slide-in-right {
+        animation: slide-in-right 0.25s ease-out forwards;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      .animate-fadeIn {
+        animation: fadeIn 0.3s ease-out forwards;
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['Fira Code', 'monospace'],
+            },
+            colors: {
+              brand: {
+                primary: '#0f172a',
+                secondary: '#0d9488',
+                teal: '#0d9488',
+                cyan: '#06b6d4',
+                slate: '#1e293b',
+                light: '#f8fafc',
+                dark: '#020617',
+              }
+            },
+            animation: {
+              'slide-in-right': 'slide-in-right 0.25s ease-out forwards',
+              'fadeIn': 'fadeIn 0.3s ease-out forwards',
+            }
+          },
+        },
+      }
+    </script>
+    <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.1.1/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.13.0",
+    "react/": "https://esm.sh/react@^19.1.1/",
+    "react": "https://esm.sh/react@^19.1.1",
+    "react-markdown": "https://esm.sh/react-markdown@^9.0.1",
+    "remark-gfm": "https://esm.sh/remark-gfm@^4.0.0",
+    "jspdf": "https://esm.sh/jspdf@^2.5.1",
+    "html2canvas": "https://esm.sh/html2canvas@^1.4.1",
+    "marked": "https://esm.sh/marked@^13.0.2",
+    "@zxing/library": "https://esm.sh/@zxing/library@^0.21.0",
+    "qrcode": "https://esm.sh/qrcode@^1.5.3",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.0",
+    "jspdf-autotable": "https://esm.sh/jspdf-autotable@^5.0.7",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "pdf-lib": "https://esm.sh/pdf-lib@^1.17.1"
+  }
+}
+</script>
+  </head>
+  <body class="bg-slate-50 dark:bg-slate-950 mesh-bg min-h-screen">
+    <div id="root"></div>
+    <audio id="shutter-sound" src="https://storage.googleapis.com/westerns1978-digital-assets/Miscellaneous/camera-shutter.mp3" preload="auto"></audio>
+    <audio id="neural-handshake" src="https://storage.googleapis.com/westerns1978-digital-assets/Miscellaneous/notification-chime.mp3" preload="auto"></audio>
+    
+    <!-- PDF.js Library for Mobile-Friendly Canvas Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs" type="module"></script>
+    <script>
+        // Make pdfjsLib available globally for the preview panel
+        window.pdfjsLibReady = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs').then(lib => {
+            lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+            window.pdfjsLib = lib;
+            return lib;
+        });
+    </script>
+    
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

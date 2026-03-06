@@ -1,0 +1,9 @@
+{
+  "name": "Aiva-WestFlow-021726",
+  "description": "An intelligent kiosk for HR, providing onboarding, training, and employee assistance.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "geolocation"
+  ]
+}
