@@ -6,6 +6,7 @@ import { westflow } from '../services/westflowClient';
 import { storageService } from '../services/storageService';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { jsPDF } from 'jspdf';
+import { SignatureStylePicker, renderToDataUrl, getInitials } from './SignatureStylePicker';
 
 type SigningStatus = 'pending' | 'placing' | 'signing' | 'signed' | 'countersigned' | 'error';
 
@@ -42,6 +43,11 @@ export const MediaViewerModal: React.FC = () => {
     
     const [signingStatus, setSigningStatus] = useState<SigningStatus>('pending');
     const [contractResult, setContractResult] = useState<any>(null);
+
+    // ─── SIGNATURE STYLE PICKER STATE ───
+    const [signatureImageData, setSignatureImageData] = useState<string | null>(null);
+    const [initialsImageData, setInitialsImageData] = useState<string | null>(null);
+    const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
 
     const personaRef = useRef(persona);
     personaRef.current = persona;
@@ -109,6 +115,9 @@ export const MediaViewerModal: React.FC = () => {
         }
         
         setAcknowledged({ popia: false, accuracy: false });
+        setSignatureImageData(null);
+        setInitialsImageData(null);
+        setSelectedStyleId(null);
         setSigningStatus('pending');
         setContractResult(null);
         setSigningMode('digital');
@@ -195,124 +204,80 @@ export const MediaViewerModal: React.FC = () => {
     const embedSignatureOnPdf = async (
         sourcePdfUrl: string,
         signerName: string,
-        signerRole: string, // 'Employee' or 'Managing Director'
-        docHash: string
+        signerRole: string,
+        docHash: string,
+        signatureImg?: string | null,
+        initialsImg?: string | null
     ): Promise<Blob> => {
-        // Fetch the source PDF (template for employee, signed copy for manager)
         const existingPdfBytes = await fetch(sourcePdfUrl).then(res => res.arrayBuffer());
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
-        
         const pages = pdfDoc.getPages();
         const lastPage = pages[pages.length - 1];
         const { width, height } = lastPage.getSize();
-        
         const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
         const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
         const courier = await pdfDoc.embedFont(StandardFonts.Courier);
-        
         const timestamp = new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' });
         const isCountersign = signerRole === 'Managing Director';
-        
-        // ─── SIGNATURE BLOCK POSITION ───
         const sigX = isCountersign ? width / 2 + 40 : 50;
-        const sigBaseY = 120; // Distance from bottom of page
-        
-        // ─── SIGNATURE LINE ───
-        lastPage.drawLine({
-            start: { x: sigX, y: sigBaseY + 50 },
-            end: { x: sigX + 200, y: sigBaseY + 50 },
-            thickness: 1,
-            color: rgb(0.2, 0.2, 0.2),
-        });
-        
-        // ─── TYPED SIGNATURE (large, ink-blue) ───
-        lastPage.drawText(signerName, {
-            x: sigX + 10,
-            y: sigBaseY + 60,
-            size: 22,
-            font: helveticaBold,
-            color: rgb(0.05, 0.15, 0.45),
-        });
-        
-        // ─── ROLE LABEL ───
-        lastPage.drawText(signerRole, {
-            x: sigX,
-            y: sigBaseY + 35,
-            size: 8,
-            font: helvetica,
-            color: rgb(0.4, 0.4, 0.4),
-        });
-        
-        // ─── DATE ───
-        lastPage.drawText(`Date: ${timestamp}`, {
-            x: sigX,
-            y: sigBaseY + 22,
-            size: 7,
-            font: helvetica,
-            color: rgb(0.4, 0.4, 0.4),
-        });
-        
-        // ─── DOCUMENT HASH ───
-        lastPage.drawText(`Ref: ${docHash}`, {
-            x: sigX,
-            y: sigBaseY + 10,
-            size: 6,
-            font: courier,
-            color: rgb(0.5, 0.5, 0.5),
-        });
-        
-        // ─── "DIGITALLY SIGNED" BADGE ───
-        const badgeX = sigX;
-        const badgeY = sigBaseY - 5;
-        
-        lastPage.drawRectangle({
-            x: badgeX,
-            y: badgeY,
-            width: 110,
-            height: 14,
-            color: rgb(0.05, 0.58, 0.53),
-            borderColor: rgb(0.04, 0.49, 0.45),
-            borderWidth: 0.5,
-        });
-        
-        lastPage.drawText('DIGITALLY SIGNED - AIVA', {
-            x: badgeX + 5,
-            y: badgeY + 3,
-            size: 7,
-            font: helveticaBold,
-            color: rgb(1, 1, 1),
-        });
-        
-        // ─── COMPANY FOOTER (only on employee sign) ───
-        if (!isCountersign) {
-            lastPage.drawText('Nashua Paarl & West Coast - AIVA Digital Signing', {
-                x: width / 2 - 100,
-                y: 25,
-                size: 6,
-                font: helvetica,
-                color: rgb(0.6, 0.6, 0.6),
-            });
+        const sigBaseY = 120;
+
+        // ── Embed signature image or typed fallback ──────────────────────────
+        if (signatureImg) {
+            try {
+                const base64 = signatureImg.replace(/^data:image\/png;base64,/, '');
+                const sigBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+                const sigImage = await pdfDoc.embedPng(sigBytes);
+                const sigDims = sigImage.scale(0.45);
+                lastPage.drawImage(sigImage, {
+                    x: sigX,
+                    y: sigBaseY + 55,
+                    width: Math.min(sigDims.width, 220),
+                    height: Math.min(sigDims.height, 65),
+                });
+            } catch {
+                lastPage.drawText(signerName, { x: sigX + 10, y: sigBaseY + 68, size: 22, font: helveticaBold, color: rgb(0.05, 0.15, 0.45) });
+            }
+        } else {
+            lastPage.drawText(signerName, { x: sigX + 10, y: sigBaseY + 68, size: 22, font: helveticaBold, color: rgb(0.05, 0.15, 0.45) });
         }
-        
-        // ─── "FULLY EXECUTED" HEADER (only on countersign) ───
+
+        lastPage.drawLine({ start: { x: sigX, y: sigBaseY + 52 }, end: { x: sigX + 200, y: sigBaseY + 52 }, thickness: 1, color: rgb(0.2, 0.2, 0.2) });
+        lastPage.drawText(signerName,  { x: sigX, y: sigBaseY + 38, size: 8, font: helveticaBold, color: rgb(0.2, 0.2, 0.2) });
+        lastPage.drawText(signerRole,  { x: sigX, y: sigBaseY + 27, size: 8, font: helvetica, color: rgb(0.4, 0.4, 0.4) });
+        lastPage.drawText(`Date: ${timestamp}`, { x: sigX, y: sigBaseY + 16, size: 7, font: helvetica, color: rgb(0.4, 0.4, 0.4) });
+        lastPage.drawText(`Ref: ${docHash}`, { x: sigX, y: sigBaseY + 5, size: 6, font: courier, color: rgb(0.5, 0.5, 0.5) });
+
+        const badgeY = sigBaseY - 10;
+        lastPage.drawRectangle({ x: sigX, y: badgeY, width: 130, height: 14, color: rgb(0.05, 0.58, 0.53), borderColor: rgb(0.04, 0.49, 0.45), borderWidth: 0.5 });
+        lastPage.drawText('✓ DIGITALLY SIGNED - AIVA', { x: sigX + 5, y: badgeY + 3, size: 7, font: helveticaBold, color: rgb(1, 1, 1) });
+
+        if (!isCountersign) {
+            lastPage.drawText('Nashua Paarl & West Coast | ECTA 2002 | POPIA 2013', { x: width / 2 - 110, y: 20, size: 6, font: helvetica, color: rgb(0.6, 0.6, 0.6) });
+        }
+
+        // ── Stamp initials on every page except last (multi-page docs) ───────
+        if (initialsImg && pages.length > 1) {
+            try {
+                const base64Init = initialsImg.replace(/^data:image\/png;base64,/, '');
+                const initBytes = Uint8Array.from(atob(base64Init), c => c.charCodeAt(0));
+                const initImage = await pdfDoc.embedPng(initBytes);
+                const initDims = initImage.scale(0.28);
+                for (let i = 0; i < pages.length - 1; i++) {
+                    const pg = pages[i];
+                    const { width: pw } = pg.getSize();
+                    pg.drawImage(initImage, { x: pw - initDims.width - 24, y: 18, width: initDims.width, height: initDims.height });
+                    pg.drawText(new Date().toLocaleDateString('en-ZA'), { x: pw - initDims.width - 24, y: 13, size: 5, font: helvetica, color: rgb(0.6, 0.6, 0.6) });
+                }
+            } catch (e) { console.warn('[PDF] Initials embed failed:', e); }
+        }
+
         if (isCountersign) {
             const firstPage = pages[0];
-            firstPage.drawText('FULLY EXECUTED', {
-                x: width / 2 - 80,
-                y: height - 30,
-                size: 12,
-                font: helveticaBold,
-                color: rgb(0.05, 0.58, 0.53),
-            });
-            firstPage.drawText(`${timestamp} - Both parties signed`, {
-                x: width / 2 - 80,
-                y: height - 42,
-                size: 7,
-                font: helvetica,
-                color: rgb(0.4, 0.4, 0.4),
-            });
+            firstPage.drawText('FULLY EXECUTED', { x: width / 2 - 80, y: height - 30, size: 12, font: helveticaBold, color: rgb(0.05, 0.58, 0.53) });
+            firstPage.drawText(`${timestamp} — Both parties signed`, { x: width / 2 - 80, y: height - 42, size: 7, font: helvetica, color: rgb(0.4, 0.4, 0.4) });
         }
-        
+
         const pdfBytes = await pdfDoc.save();
         return new Blob([pdfBytes as any], { type: 'application/pdf' });
     };
@@ -344,7 +309,7 @@ export const MediaViewerModal: React.FC = () => {
                 sourcePdfUrl = CONTRACT_TEMPLATE;
             }
 
-            const pdfBlob = await embedSignatureOnPdf(sourcePdfUrl, signName, role, docHash);
+            const pdfBlob = await embedSignatureOnPdf(sourcePdfUrl, signName, role, docHash, signatureImageData, initialsImageData);
             const sigFileName = `${isManagerPersona ? 'countersigned' : 'signed'}_${Date.now()}.pdf`;
             
             const uploadResult = await storageService.uploadFile(
@@ -469,6 +434,38 @@ export const MediaViewerModal: React.FC = () => {
                 setSigningStatus('countersigned');
                 triggerSuccessFeedback("Contract Countersigned.");
                 triggerHubRefresh();
+
+                // ── Send WhatsApp congratulations to employee ──────────────
+                try {
+                    const getResp2 = await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata,staff_name`, {
+                        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+                    });
+                    const hireRows = await getResp2.json();
+                    const hireMeta = hireRows?.[0]?.metadata || {};
+                    const empPhone = hireMeta?.phone_number || hireMeta?.cell_phone || hireMeta?.phone;
+                    const empName = hireMeta?.first_names
+                        ? `${hireMeta.first_names} ${hireMeta.surname || ''}`.trim()
+                        : hireRows?.[0]?.staff_name || 'Employee';
+
+                    if (empPhone) {
+                        await fetch(`https://westflow-platform-608887102507.us-west1.run.app/api/westflow/aiva/send_whatsapp_notification`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                phone: empPhone,
+                                message: `🎉 Welcome to the Nashua family, ${empName}!\n\nYour employment contract has been fully executed and countersigned by ${signName}.\n\nYou are officially a member of the Nashua Paarl & West Coast team. We look forward to great things ahead!\n\n— Nashua Paarl & West Coast`
+                            })
+                        });
+                    }
+                } catch (waErr) {
+                    console.warn('[MediaViewer] Employee WhatsApp notification failed:', waErr);
+                }
+
+                // Close modal after short delay so Deon sees the success state
+                setTimeout(() => {
+                    setShowSigningPanel(false);
+                    closeMedia();
+                }, 2000);
             } else {
                 const result = await westflow.signContractDigital(hireId, signName, uploadResult.publicUrl, 'digital');
                 if (result.success) {
@@ -767,7 +764,12 @@ export const MediaViewerModal: React.FC = () => {
                                                     <input 
                                                         type="text"
                                                         value={signName}
-                                                        onChange={(e) => setSignName(e.target.value)}
+                                                        onChange={(e) => {
+                                                            setSignName(e.target.value);
+                                                            setSignatureImageData(null);
+                                                            setInitialsImageData(null);
+                                                            setSelectedStyleId(null);
+                                                        }}
                                                         className="w-full pl-14 pr-6 py-5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-2xl font-black italic text-xl text-slate-900 dark:text-white outline-none focus:border-[#0d9488] transition-all shadow-inner"
                                                         placeholder="Type your full name"
                                                         autoFocus
@@ -775,20 +777,17 @@ export const MediaViewerModal: React.FC = () => {
                                                 </div>
                                             </div>
 
+                                            {/* ─── SIGNATURE STYLE PICKER ─── */}
                                             {signName.length > 2 && (
-                                                <div className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-white/10 shadow-inner">
-                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                                                        Signature Preview
-                                                    </p>
-                                                    <div className="py-4 border-b-2 border-slate-200 dark:border-slate-600">
-                                                        <p className="text-4xl font-handwriting text-slate-800 dark:text-white italic tracking-tighter">
-                                                            {signName}
-                                                        </p>
-                                                    </div>
-                                                    <p className="text-[8px] font-mono text-slate-400 uppercase tracking-widest mt-3">
-                                                        {isManagerPersona ? 'Managing Director' : 'Employee'} · {new Date().toLocaleDateString('en-ZA')}
-                                                    </p>
-                                                </div>
+                                                <SignatureStylePicker
+                                                    name={signName}
+                                                    defaultStyleId={selectedStyleId || undefined}
+                                                    onConfirm={({ signatureDataUrl, initialsDataUrl, styleId }) => {
+                                                        setSignatureImageData(signatureDataUrl);
+                                                        setInitialsImageData(initialsDataUrl);
+                                                        setSelectedStyleId(styleId);
+                                                    }}
+                                                />
                                             )}
                                         </div>
                                     )}
@@ -840,7 +839,7 @@ export const MediaViewerModal: React.FC = () => {
                                     <div className="space-y-6 pt-4">
                                         <button 
                                             onClick={handleDigitalExecute} 
-                                            disabled={isExecuting || (!isPolicyDoc && signName.length < 3) || !acknowledged.popia || !acknowledged.accuracy}
+                                            disabled={isExecuting || (!isPolicyDoc && signName.length < 3) || !acknowledged.popia || !acknowledged.accuracy || (!isPolicyDoc && !isManagerPersona && !signatureImageData)}
                                             className={`w-full py-6 text-white font-black rounded-[2rem] transition-all flex items-center justify-center gap-4 uppercase tracking-[0.2em] text-sm border-b-4 disabled:opacity-30 disabled:grayscale ${buttonColorClass}`}
                                         >
                                             {isExecuting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Signature className="w-6 h-6" />}

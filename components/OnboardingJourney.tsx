@@ -2080,15 +2080,31 @@ const OnboardingJourney: React.FC = () => {
                 />
             )}
 
-            {showPolicyPacket && hireId && currentStep?.templates && (
-                <PolicyPacketFlow 
-                    documents={currentStep.templates}
-                    hireName={identifiedName || 'New Hire'}
-                    hireId={hireId}
-                    onComplete={handlePacketComplete}
-                    onClose={() => setShowPolicyPacket(false)}
-                />
-            )}
+            {showPolicyPacket && hireId && currentStep?.templates && (() => {
+                // ── Sales-role detection ─────────────────────────────────────
+                // Commission manual is only relevant for sales/consultant roles
+                const jd = (currentHire?.metadata?.job_description || '').toLowerCase();
+                const isSalesRole = [
+                    'sales', 'consultant', 'executive', 'account', 'business development', 'bd'
+                ].some(kw => jd.includes(kw));
+
+                const filteredDocs = (currentStep.templates as any[]).filter((doc: any) => {
+                    const name = (doc.name || doc.label || doc.title || '').toLowerCase();
+                    const url  = (doc.url  || doc.template || '').toLowerCase();
+                    const isCommission = name.includes('commission') || url.includes('commission');
+                    return isCommission ? isSalesRole : true;
+                });
+
+                return (
+                    <PolicyPacketFlow 
+                        documents={filteredDocs}
+                        hireName={identifiedName || 'New Hire'}
+                        hireId={hireId}
+                        onComplete={handlePacketComplete}
+                        onClose={() => setShowPolicyPacket(false)}
+                    />
+                );
+            })()}
 
             {showUploadPanel && hireId && currentStep && (
                 <UploadStepPanel
@@ -2285,7 +2301,17 @@ const OnboardingJourney: React.FC = () => {
                 </div>
             </div>
             
-            <DocumentHub isOpen={isDocHubOpen} onClose={() => setIsDocHubOpen(false)} onSuccess={() => currentStep && handleStepComplete(currentStep.id)} initialDocType={currentStep?.id === 'step2' ? "ID Document" : currentStep?.id === 'step3' ? "Proof of Residence" : "Bank Confirmation"} />
+            <DocumentHub isOpen={isDocHubOpen} onClose={() => setIsDocHubOpen(false)} onSuccess={(docType, extractedFields) => {
+                // Merge OCR-extracted flat fields into currentHire metadata immediately
+                // so FormEngine's initialData is pre-populated when the form opens next
+                if (extractedFields && Object.keys(extractedFields).length > 0) {
+                    setCurrentHire((prev: any) => prev ? {
+                        ...prev,
+                        metadata: { ...(prev.metadata || {}), ...extractedFields }
+                    } : prev);
+                }
+                if (currentStep) handleStepComplete(currentStep.id);
+            }} initialDocType={currentStep?.id === 'step2' ? "ID Document" : currentStep?.id === 'step3' ? "Proof of Residence" : "Bank Confirmation"} />
 
             {activeFormStep && HR_FORMS[activeFormStep] && (
                 <FormEngine 

@@ -40,7 +40,7 @@ const useBackButtonClose = (isOpen: boolean, onClose: () => void) => {
 interface DocumentHubProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (docType: string) => void;
+  onSuccess?: (docType: string, extractedFields?: Record<string, string>) => void;
   initialDocType?: string;
   initialMode?: 'capture' | 'import';
   workerId?: string;
@@ -217,6 +217,38 @@ export const DocumentHub: React.FC<DocumentHubProps> = ({ isOpen, onClose, onSuc
                         const fileName = extraction?.suggested_filename 
                             ? `${extraction.suggested_filename}_${Date.now()}.jpg`
                             : `${extractionType}_${Date.now()}.jpg`;
+
+                        // ── Flatten entities so ExtractionField UI and FormEngine both work ──
+                        const entities = extraction?.entities || {};
+                        const flatFields: Record<string, string> = {};
+
+                        if (extractionType === 'id') {
+                            if (entities.full_name)    flatFields.full_name    = entities.full_name;
+                            if (entities.surname)      flatFields.surname      = entities.surname;
+                            if (entities.first_names)  flatFields.first_names  = entities.first_names;
+                            if (entities.id_number)    flatFields.id_number    = entities.id_number;
+                            if (entities.date_of_birth) flatFields.date_of_birth = entities.date_of_birth;
+                            if (entities.gender)       flatFields.gender       = entities.gender;
+                            if (entities.nationality)  flatFields.nationality  = entities.nationality;
+                        } else if (extractionType === 'residence') {
+                            if (entities.account_holder)  flatFields.full_name        = entities.account_holder;
+                            if (entities.address_line_1)  flatFields.home_address_line_1 = entities.address_line_1;
+                            if (entities.address_line_2)  flatFields.home_address_line_2 = entities.address_line_2;
+                            if (entities.city)            flatFields.home_address_city  = entities.city;
+                            if (entities.postal_code)     flatFields.postal_code        = entities.postal_code;
+                            if (entities.province)        flatFields.home_address_province = entities.province;
+                            if (entities.provider)        flatFields.provider           = entities.provider;
+                        } else if (extractionType === 'banking') {
+                            if (entities.account_holder)  flatFields.full_name      = entities.account_holder;
+                            if (entities.bank_name)       flatFields.bank_name      = entities.bank_name;
+                            if (entities.branch_code)     flatFields.branch_code    = entities.branch_code;
+                            if (entities.branch_name)     flatFields.branch_name    = entities.branch_name;
+                            if (entities.account_number)  flatFields.account_number = entities.account_number;
+                            if (entities.account_type)    flatFields.account_type   = entities.account_type;
+                        }
+
+                        // Set extractedData so ExtractionField UI renders the values
+                        setExtractedData(flatFields);
                         
                         try {
                             setStep('ingesting');
@@ -259,6 +291,9 @@ export const DocumentHub: React.FC<DocumentHubProps> = ({ isOpen, onClose, onSuc
                                             body: JSON.stringify({
                                                 metadata: {
                                                     ...currentMeta,
+                                                    // ── Flat fields for FormEngine initialData ──
+                                                    ...flatFields,
+                                                    // ── Nested doc record for audit trail ──
                                                     documents: {
                                                         ...(currentMeta.documents || {}),
                                                         [extractionType]: {
@@ -279,7 +314,7 @@ export const DocumentHub: React.FC<DocumentHubProps> = ({ isOpen, onClose, onSuc
                             }
                             
                             triggerSuccessFeedback(`${initialDocType || docType} saved.`);
-                            if (onSuccess) onSuccess(initialDocType || docType || "Document");
+                            if (onSuccess) onSuccess(initialDocType || docType || "Document", flatFields);
                             // Close everything immediately — no middleman screen
                             setTimeout(() => {
                                 setShowVisionCapture(false);

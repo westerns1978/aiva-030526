@@ -47,7 +47,11 @@ export const PolicyPacketFlow: React.FC<PolicyPacketFlowProps> = ({ documents, h
 
     const currentDoc = documents[currentIndex];
     const progress = ((currentIndex + 1) / documents.length) * 100;
-    const pdfUrl = `https://storage.googleapis.com/gemynd-public/projects/aiva/${currentDoc.template}`;
+    // For the JD doc, use the hire-specific job_description_url if available (correct role JD),
+    // otherwise fall back to the generic Sales JD template in GCS.
+    const pdfUrl = (currentDoc.key === 'job_description' && currentHire?.metadata?.job_description_url)
+        ? currentHire.metadata.job_description_url
+        : `https://storage.googleapis.com/gemynd-public/projects/aiva/${currentDoc.template}`;
 
     // Reset signing mode when switching docs
     useEffect(() => {
