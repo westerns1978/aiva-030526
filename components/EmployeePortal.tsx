@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import type { AppView } from '../types';
 import { 
@@ -43,13 +43,11 @@ const SidebarItem: React.FC<{
             }`}
         >
             <Icon className={`h-5 w-5 shrink-0 transition-all ${isActive ? 'text-[#0d9488]' : 'text-current'} ${!isExpanded ? 'mx-auto' : 'mr-3'}`} />
-            
             <span className={`truncate font-bold uppercase text-[10px] tracking-widest transition-all duration-200 ${
                 isExpanded ? 'opacity-100 w-auto ml-0' : 'opacity-0 w-0 -ml-4'
             }`}>
                 {label}
             </span>
-            
             {!isExpanded && (
                 <div className="absolute left-full ml-4 px-3 py-1.5 bg-[#0f172a] text-white text-[10px] font-black uppercase rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50 whitespace-nowrap border border-white/10 shadow-2xl translate-x-2 group-hover:translate-x-0">
                     {label}
@@ -69,62 +67,71 @@ export const EmployeePortal: React.FC = () => {
     useClickOutside(userMenuRef as any, () => setIsUserMenuOpen(false));
 
     const isExpanded = isSidebarPinned || isSidebarHovered;
-
-    // Redirection Logic: New hires shouldn't see the dashboard
     const effectiveView = (!isManager && activeView === 'home') ? 'onboarding' : activeView;
 
-    const handleNavigation = (view: AppView, tab?: any) => {
-        if (view === 'home' && tab) {
-            setHomeActiveTab(tab);
+    // Clear localStorage session data + any module-level signature store, then
+    // delegate full auth/persona reset to AppContext's handleGoHome.
+    const handleLogout = () => {
+        setIsUserMenuOpen(false);
+        setIsMenuOpen(false);
+        // Wipe form drafts and session prefs
+        const toRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && (k.startsWith('aiva_form_draft_') || k.startsWith('aiva-'))) toRemove.push(k);
         }
+        toRemove.forEach(k => localStorage.removeItem(k));
+        // Wipe the module-level signature store used by SignaturePicker.
+        // Keyed as 'aiva_saved_signature' — adjust if your key differs.
+        try { localStorage.removeItem('aiva_saved_signature'); } catch { /* ignore */ }
+        // AppContext resets isAuthenticated, persona, currentHire, activeView
+        handleGoHome();
+    };
+
+    const handleNavigation = (view: AppView, tab?: any) => {
+        if (view === 'home' && tab) setHomeActiveTab(tab);
         setActiveView(view);
         setIsMenuOpen(false);
     };
 
     const renderContent = () => {
         switch (effectiveView) {
-            case 'home': return <Suspense fallback={<SkeletonDashboard />}><StaffDashboard /></Suspense>;
+            case 'home':       return <Suspense fallback={<SkeletonDashboard />}><StaffDashboard /></Suspense>;
             case 'onboarding': return <OnboardingJourney />;
-            case 'policies': return <Suspense fallback={<SkeletonDashboard />}><HrPortal /></Suspense>;
-            case 'training': return <TrainingCenter allModules={TRAINING_MODULES} />;
-            case 'directory': return <StaffDirectory />;
-            default: return isManager ? <Suspense fallback={<SkeletonDashboard />}><StaffDashboard /></Suspense> : <OnboardingJourney />;
+            case 'policies':   return <Suspense fallback={<SkeletonDashboard />}><HrPortal /></Suspense>;
+            case 'training':   return <TrainingCenter allModules={TRAINING_MODULES} />;
+            case 'directory':  return <StaffDirectory />;
+            default: return isManager
+                ? <Suspense fallback={<SkeletonDashboard />}><StaffDashboard /></Suspense>
+                : <OnboardingJourney />;
         }
     };
 
-    // Persona-Aware Navigation
     const menuItems: { label: string; icon: any; view: AppView; tab?: any }[] = [];
-
-    if (isManager) {
-        menuItems.push({ label: "Dashboard", icon: HomeIcon, view: 'home' });
-    }
-
+    if (isManager) menuItems.push({ label: "Dashboard", icon: HomeIcon, view: 'home' });
     menuItems.push({ label: "Onboarding", icon: ClipboardDocumentListIcon, view: 'onboarding' });
-    menuItems.push({ label: "Policies", icon: BookOpenIcon, view: 'policies' });
-    menuItems.push({ label: "Training", icon: AcademicCapIcon, view: 'training' });
-    menuItems.push({ label: "Our Team", icon: UsersIcon, view: 'directory' });
+    menuItems.push({ label: "Policies",   icon: BookOpenIcon,              view: 'policies'   });
+    menuItems.push({ label: "Training",   icon: AcademicCapIcon,           view: 'training'   });
+    menuItems.push({ label: "Our Team",   icon: UsersIcon,                 view: 'directory'  });
 
-    const toggleTheme = () => {
-        setTheme(theme === 'dark' ? 'light' : 'dark');
-    };
+    const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
     return (
         <DropZone>
             <div className="flex h-full relative overflow-hidden bg-transparent transition-colors duration-300">
                 <CommandPalette />
                 
+                {/* Desktop Sidebar */}
                 <aside 
                     onMouseEnter={() => setIsSidebarHovered(true)}
                     onMouseLeave={() => setIsSidebarHovered(false)}
-                    className={`hidden md:flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-white/5 transition-all duration-300 ease-in-out z-50 shadow-sm ${
-                        isExpanded ? 'w-64' : 'w-[72px]'
-                    }`}
+                    className={`hidden md:flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-white/5 transition-all duration-300 ease-in-out z-50 shadow-sm ${isExpanded ? 'w-64' : 'w-[72px]'}`}
                 >
                     <div className="h-24 md:h-28 flex items-center justify-center border-b border-slate-100 dark:border-white/5 shrink-0 overflow-hidden">
                         {!isExpanded ? (
-                             <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0">
+                            <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0">
                                 <AivaLogo className="h-10 w-auto !brightness-100" />
-                             </div>
+                            </div>
                         ) : (
                             <div className="px-6 w-full animate-fadeIn flex justify-center py-6">
                                 <AivaLogo className="h-16 w-auto transition-transform duration-700 !brightness-100" />
@@ -169,14 +176,13 @@ export const EmployeePortal: React.FC = () => {
                     </div>
                 </aside>
 
+                {/* Main content */}
                 <div className="flex-1 flex flex-col min-w-0 bg-slate-50/30 dark:bg-transparent">
-                    
                     <header className="h-16 md:h-20 shrink-0 border-b border-slate-200 dark:border-white/5 glass-panel z-40 flex items-center px-4 md:px-8 justify-between">
                         <div className="flex items-center gap-4 flex-1">
                             <button onClick={() => setIsMenuOpen(true)} className="p-2 -ml-2 text-slate-500 md:hidden">
                                 <MenuIcon className="w-6 h-6" />
                             </button>
-                            
                             <div className="flex items-center gap-4">
                                 <h2 className="hidden md:block text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-tighter">
                                     {effectiveView === 'home' ? 'Dashboard' : 
@@ -189,7 +195,6 @@ export const EmployeePortal: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-3 md:gap-6">
-                            {/* Current hire badge — manager only */}
                             {isManager && currentHire && (
                                 <div className="hidden lg:flex items-center gap-2 px-4 py-1.5 bg-brand-primary/5 rounded-full border border-brand-primary/10">
                                     <div className="w-1.5 h-1.5 bg-[#0d9488] rounded-full animate-pulse"></div>
@@ -199,7 +204,6 @@ export const EmployeePortal: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* AIVA button — show for everyone */}
                             <button 
                                 onClick={() => setIsCopilotOpen(true)}
                                 className="p-2.5 bg-[#0d9488]/10 text-[#0d9488] hover:bg-[#0d9488]/20 rounded-xl transition-all flex items-center gap-2 border border-[#0d9488]/10"
@@ -209,7 +213,6 @@ export const EmployeePortal: React.FC = () => {
                                 <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">AIVA</span>
                             </button>
 
-                            {/* Theme toggle — manager only */}
                             {isManager && (
                                 <button 
                                     onClick={toggleTheme}
@@ -220,7 +223,6 @@ export const EmployeePortal: React.FC = () => {
                                 </button>
                             )}
 
-                            {/* User menu — manager only */}
                             {isManager ? (
                                 <div className="flex items-center gap-2 md:gap-4 relative" ref={userMenuRef}>
                                     <button 
@@ -247,7 +249,7 @@ export const EmployeePortal: React.FC = () => {
                                             </button>
                                             <div className="h-px bg-slate-100 dark:bg-white/5 my-2" />
                                             <button 
-                                                onClick={handleGoHome}
+                                                onClick={handleLogout}
                                                 className="w-full flex items-center gap-3 px-4 py-3 text-xs font-black text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-all text-left uppercase tracking-widest"
                                             >
                                                 <LogOut className="w-4 h-4" /> Log Out
@@ -262,7 +264,7 @@ export const EmployeePortal: React.FC = () => {
                                         <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">{currentHire ? 'Onboarding' : 'New Hire'}</p>
                                     </div>
                                     <button 
-                                        onClick={handleGoHome}
+                                        onClick={handleLogout}
                                         className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-100 transition-all shadow-sm"
                                         title="Log Out"
                                     >
@@ -280,11 +282,14 @@ export const EmployeePortal: React.FC = () => {
                     </main>
                 </div>
 
+                {/* Mobile slide-out menu */}
                 <div className={`fixed inset-y-0 left-0 z-[150] w-72 bg-white dark:bg-slate-900 shadow-2xl transform transition-transform duration-300 ease-in-out lg:hidden ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                     <div className="p-6 h-full flex flex-col">
                         <div className="flex items-center justify-between mb-10">
                             <AivaLogo className="h-12 w-auto !brightness-100" />
-                            <button onClick={() => setIsMenuOpen(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full"><CloseIcon className="w-6 h-6" /></button>
+                            <button onClick={() => setIsMenuOpen(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
+                                <CloseIcon className="w-6 h-6" />
+                            </button>
                         </div>
                         
                         <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-white/5 rounded-3xl mb-8 border border-slate-100 dark:border-white/5">
@@ -319,7 +324,7 @@ export const EmployeePortal: React.FC = () => {
                                     {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
                                 </button>
                             )}
-                             <button className="w-full flex items-center gap-4 p-4 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-white/5 rounded-2xl transition-all text-left">
+                            <button className="w-full flex items-center gap-4 p-4 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-white/5 rounded-2xl transition-all text-left">
                                 <Settings className="w-5 h-5" /> Settings
                             </button>
                             <button className="w-full flex items-center gap-4 p-4 text-slate-600 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-white/5 rounded-2xl transition-all text-left">
@@ -327,7 +332,7 @@ export const EmployeePortal: React.FC = () => {
                             </button>
                         </nav>
 
-                        <button onClick={handleGoHome} className="w-full flex items-center gap-4 p-4 text-rose-500 font-black uppercase tracking-widest text-[10px] hover:bg-rose-500/10 rounded-2xl transition-all mt-auto border-t border-slate-100 dark:border-white/5 pt-6 text-left">
+                        <button onClick={handleLogout} className="w-full flex items-center gap-4 p-4 text-rose-500 font-black uppercase tracking-widest text-[10px] hover:bg-rose-500/10 rounded-2xl transition-all mt-auto border-t border-slate-100 dark:border-white/5 pt-6 text-left">
                             <LogOut className="w-5 h-5" /> Log Out
                         </button>
                     </div>

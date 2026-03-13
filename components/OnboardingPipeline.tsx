@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { RefreshIcon, MagnifyingGlassIcon, WhatsAppIcon, ComputerDesktopIcon, AiSparkIcon, CloseIcon } from './icons';
-import { Loader2, Send, FileCheck, User, Filter, Trash2, ArrowRight } from 'lucide-react';
+import { Loader2, Send, FileCheck, Filter, Trash2, ArrowRight } from 'lucide-react';
 import { useAgent } from '../hooks/useWestFlow';
 import { useAppContext } from '../context/AppContext';
 import { DemoReset } from './DemoReset';
-
 import { realtimeService } from '../services/realtimeService';
 
 interface PipelineItem {
@@ -23,31 +22,93 @@ interface PipelineItem {
   };
 }
 
+// ─── FrictionReasoning ───────────────────────────────────────────────────────
+// Labels align with the 8-step ONBOARDING_STEPS definition:
+//   1 = Offer acceptance
+//   2 = ID verification
+//   3 = Address verification
+//   4 = Banking details
+//   5 = Policy review
+//   6 = Benefits & document signing
+//   7 = Contract signing
+//   8 = Final review / countersign wait
+
+const STEP_LABELS: Record<number, string> = {
+    1: 'Reviewing offer',
+    2: 'ID verification',
+    3: 'Address verification',
+    4: 'Banking details',
+    5: 'Policy review',
+    6: 'Benefits & documents',
+    7: 'Contract signing',
+    8: 'Awaiting countersign',
+};
+
 const FrictionReasoning: React.FC<{ step: number; contractStatus?: string }> = ({ step, contractStatus }) => {
-    if (contractStatus === 'signed') {
+    if (contractStatus === 'countersigned') {
         return (
-            <div className="flex items-center gap-2 group cursor-help animate-pulse" title="Candidate has signed. Final manager countersign required.">
-                <div className="p-1.5 bg-amber-500/10 rounded-lg border border-amber-500/20"><FileCheck className="w-3.5 h-3.5 text-amber-600" /></div>
-                <span className="text-[10px] font-black text-amber-700 uppercase tracking-tighter">Step 6 · Needs MD Signature</span>
+            <div className="flex items-center gap-2" title="Fully countersigned — export complete.">
+                <div className="p-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                    <FileCheck className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <span className="text-[10px] font-black text-emerald-700 uppercase tracking-tighter">Complete ✓</span>
             </div>
         );
     }
-    const reasons = [
-        "Welcome step.",
-        "Awaiting ID photo.",
-        "Address check pending.",
-        "Waiting for bank info.",
-        "Policy packets pending.",
-        "Contract signing step.",
-        "Final profile check."
-    ];
+
+    if (contractStatus === 'signed') {
+        return (
+            <div className="flex items-center gap-2 animate-pulse" title="Employee has signed — awaiting MD countersignature.">
+                <div className="p-1.5 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                    <FileCheck className="w-3.5 h-3.5 text-amber-600" />
+                </div>
+                <span className="text-[10px] font-black text-amber-700 uppercase tracking-tighter">Step 8 · Needs MD Signature</span>
+            </div>
+        );
+    }
+
+    const label = STEP_LABELS[step] || 'In progress';
+
     return (
-        <div className="flex items-center gap-2 group cursor-help" title={`Currently active: ${reasons[step-1]}`}>
-            <div className="p-1.5 bg-brand-primary/5 rounded-lg border border-brand-primary/10"><AiSparkIcon className="w-3.5 h-3.5 text-brand-primary" /></div>
-            <span className="text-[10px] font-bold text-slate-500 italic truncate max-w-[180px]">Step {step} · {reasons[step-1] || 'Syncing...'}</span>
+        <div className="flex items-center gap-2 cursor-help" title={`Step ${step} of 8 — ${label}`}>
+            <div className="p-1.5 bg-brand-primary/5 rounded-lg border border-brand-primary/10">
+                <AiSparkIcon className="w-3.5 h-3.5 text-brand-primary" />
+            </div>
+            <span className="text-[10px] font-bold text-slate-500 italic truncate max-w-[180px]">
+                Step {step} · {label}
+            </span>
         </div>
     );
-}
+};
+
+// ─── Action label for the pipeline row button ─────────────────────────────────
+const getActionLabel = (step: number, contractStatus?: string): string => {
+    if (contractStatus === 'countersigned') return 'View Record';
+    if (contractStatus === 'signed')        return 'Countersign ✍️';
+    const labels: Record<number, string> = {
+        1: 'Review Offer',
+        2: 'Check ID',
+        3: 'Check Address',
+        4: 'Check Banking',
+        5: 'Review Policies',
+        6: 'Review Docs',
+        7: 'Review Contract',
+        8: 'Countersign',
+    };
+    return labels[step] || 'View File';
+};
+
+// ─── Progress bar color based on % complete ───────────────────────────────────
+const getProgressBarColor = (progress: number): string => {
+    if (progress <= 25) return 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]';
+    if (progress <= 50) return 'bg-[#0d9488] shadow-[0_0_8px_rgba(13,148,136,0.3)]';
+    if (progress <= 75) return 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
+    return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]';
+};
+
+const TOTAL_STEPS = 8; // Keep in sync with ONBOARDING_STEPS length
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export const OnboardingPipeline: React.FC = () => {
   const { addToast, setCurrentHire, setActiveView, setPersona, persona, hubFilter, setHubFilter, focusedHireId, setFocusedHireId } = useAppContext();
@@ -61,14 +122,12 @@ export const OnboardingPipeline: React.FC = () => {
 
   const fetchPipeline = useCallback(async (silent: boolean = false) => {
     if (silent) setIsRefreshing(true);
-    
     const resp = await callTool('get_pipeline');
     if (resp?.success) {
       setPipeline(resp.pipeline || []);
     } else if (!silent) {
        addToast("Unable to refresh hiring list", "error");
     }
-    
     setIsRefreshing(false);
   }, [callTool, addToast]);
 
@@ -86,7 +145,7 @@ export const OnboardingPipeline: React.FC = () => {
         const timer = setTimeout(() => setFocusedHireId(null), 3000);
         return () => clearTimeout(timer);
     }
-  }, [focusedHireId, pipeline]);
+  }, [focusedHireId, pipeline, setFocusedHireId]);
 
   const handleNudge = async (item: PipelineItem) => {
       setActionInProgress(item.id);
@@ -95,7 +154,7 @@ export const OnboardingPipeline: React.FC = () => {
           if (resp.success) {
               addToast(`Reminder sent to ${item.staff_name}.`, "success");
           }
-      } catch (e) {
+      } catch {
           addToast("Unable to send nudge.", "error");
       } finally {
           setActionInProgress(null);
@@ -103,7 +162,7 @@ export const OnboardingPipeline: React.FC = () => {
   };
 
   const handleEnterJourney = (item: PipelineItem) => {
-    setCurrentHire(item); 
+    setCurrentHire(item);
     if (persona !== 'manager') {
         setPersona('employee');
     }
@@ -111,10 +170,9 @@ export const OnboardingPipeline: React.FC = () => {
   };
 
   const filteredPipeline = useMemo(() => {
-    // Exclude archived demo records
-    let list = pipeline.filter(p => 
+    let list = pipeline.filter(p =>
         p.status !== 'demo_archived' && (
-        p.staff_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        p.staff_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (p.staff_id && p.staff_id.toLowerCase().includes(searchTerm.toLowerCase())))
     );
 
@@ -138,24 +196,6 @@ export const OnboardingPipeline: React.FC = () => {
     return list;
   }, [pipeline, searchTerm, hubFilter]);
 
-  const getProgressBarColor = (progress: number) => {
-    if (progress <= 25) return 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.3)]';
-    if (progress <= 50) return 'bg-[#0d9488] shadow-[0_0_8px_rgba(13,148,136,0.3)]';
-    if (progress <= 75) return 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]';
-    return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]';
-  };
-
-  const getActionLabel = (step: number, contractStatus?: string) => {
-    if (contractStatus === 'signed') return 'Countersign';
-    if (step === 1) return 'Review Offer';
-    if (step === 2) return 'Check ID';
-    if (step === 3) return 'Check Address';
-    if (step === 4) return 'Check Banking';
-    if (step === 5) return 'Review Policies';
-    if (step === 6) return 'Review Contract';
-    return 'View File';
-  };
-
   return (
     <div className="space-y-8 animate-fadeIn">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0">
@@ -177,12 +217,12 @@ export const OnboardingPipeline: React.FC = () => {
             <div className="bg-white dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-white/10 shadow-sm flex gap-2">
                  <div className="relative">
                     <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                    <input 
-                        type="text" 
-                        placeholder="Search candidates..." 
-                        value={searchTerm} 
-                        onChange={(e) => setSearchTerm(e.target.value)} 
-                        className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-white/5 rounded-lg text-[10px] font-black uppercase text-slate-900 dark:text-white outline-none focus:border-[#0d9488] transition-all w-48" 
+                    <input
+                        type="text"
+                        placeholder="Search candidates..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-white/5 rounded-lg text-[10px] font-black uppercase text-slate-900 dark:text-white outline-none focus:border-[#0d9488] transition-all w-48"
                     />
                 </div>
                 <button onClick={() => fetchPipeline()} className="p-2 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-all">
@@ -205,31 +245,56 @@ export const OnboardingPipeline: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-white/5 font-medium">
                     {isLoading && pipeline.length === 0 ? (
-                        <tr><td colSpan={5} className="py-24 text-center text-slate-400 font-mono text-[9px] uppercase tracking-widest animate-pulse">Checking records...</td></tr>
+                        <tr>
+                            <td colSpan={5} className="py-24 text-center text-slate-400 font-mono text-[9px] uppercase tracking-widest animate-pulse">
+                                Checking records...
+                            </td>
+                        </tr>
                     ) : filteredPipeline.length > 0 ? filteredPipeline.map(item => {
-                        const isFocused = item.id === focusedHireId;
-                        const progress = Math.round((item.step_reached/7)*100);
+                        const isFocused       = item.id === focusedHireId;
+                        // ✅ Fixed: divide by TOTAL_STEPS (8) not 7
+                        const progress        = Math.round((item.step_reached / TOTAL_STEPS) * 100);
+                        const contractStatus  = item.metadata?.contract_status;
+                        const needsCountersign = contractStatus === 'signed';
+                        const isComplete      = contractStatus === 'countersigned';
+
                         return (
-                            <tr 
-                                key={item.id} 
+                            <tr
+                                key={item.id}
                                 ref={isFocused ? focusedRef : null}
-                                className={`transition-all duration-700 group ${isFocused ? 'bg-[#0d9488]/10 ring-2 ring-[#0d9488] ring-inset' : item.metadata?.contract_status === 'signed' ? 'bg-amber-500/5 hover:bg-amber-500/10' : 'hover:bg-slate-50 dark:hover:bg-[#0d9488]/5'}`}
+                                className={`transition-all duration-700 group ${
+                                    isFocused       ? 'bg-[#0d9488]/10 ring-2 ring-[#0d9488] ring-inset' :
+                                    needsCountersign ? 'bg-amber-500/5 hover:bg-amber-500/10' :
+                                    isComplete      ? 'bg-emerald-500/5 hover:bg-emerald-500/10' :
+                                    'hover:bg-slate-50 dark:hover:bg-[#0d9488]/5'
+                                }`}
                             >
-                                <td className="px-8 py-5" onClick={() => handleEnterJourney(item)}>
+                                {/* Candidate */}
+                                <td className="px-8 py-5 cursor-pointer" onClick={() => handleEnterJourney(item)}>
                                     <div className="flex items-center gap-3">
                                         {item.metadata?.profile_photo_url ? (
-                                            <img src={item.metadata.profile_photo_url} alt="" className="w-9 h-9 rounded-full object-cover border-2 border-[#0d9488]/20 shrink-0" />
+                                            <img
+                                                src={item.metadata.profile_photo_url}
+                                                alt=""
+                                                className="w-9 h-9 rounded-full object-cover border-2 border-[#0d9488]/20 shrink-0"
+                                            />
                                         ) : (
                                             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#0d9488]/20 to-[#0d9488]/5 flex items-center justify-center text-[#0d9488] text-sm font-bold border border-[#0d9488]/20 shadow-inner shrink-0">
                                                 {item.staff_name?.charAt(0)?.toUpperCase() || '?'}
                                             </div>
                                         )}
                                         <div>
-                                            <p className="font-black text-slate-900 dark:text-white uppercase tracking-tighter italic group-hover:text-[#0d9488] transition-colors cursor-pointer truncate max-w-[160px]">{item.staff_name}</p>
-                                            <p className="text-[8px] font-mono text-slate-400 uppercase mt-0.5 tracking-widest">ID: {item.staff_id || item.id.slice(0,8)}</p>
+                                            <p className="font-black text-slate-900 dark:text-white uppercase tracking-tighter italic group-hover:text-[#0d9488] transition-colors truncate max-w-[160px]">
+                                                {item.staff_name}
+                                            </p>
+                                            <p className="text-[8px] font-mono text-slate-400 uppercase mt-0.5 tracking-widest">
+                                                ID: {item.staff_id || item.id.slice(0, 8)}
+                                            </p>
                                         </div>
                                     </div>
                                 </td>
+
+                                {/* Method */}
                                 <td className="px-8 py-5">
                                     {item.metadata?.channel === 'whatsapp' ? (
                                         <div className="flex items-center gap-1.5 text-emerald-600 font-black uppercase text-[8px] tracking-widest bg-emerald-50 dark:bg-emerald-500/5 px-2.5 py-1 rounded-lg border border-emerald-100 dark:border-emerald-500/10 inline-flex">
@@ -241,42 +306,64 @@ export const OnboardingPipeline: React.FC = () => {
                                         </div>
                                     )}
                                 </td>
+
+                                {/* Progress — /8 */}
                                 <td className="px-8 py-5">
-                                    <div className="space-y-2 w-36" title={`Candidate is at step ${item.step_reached} of 7`}>
+                                    <div className="space-y-2 w-36" title={`Step ${item.step_reached} of ${TOTAL_STEPS}`}>
                                         <div className="flex justify-between text-[8px] font-black uppercase text-slate-400 tracking-widest">
                                             <span>Progress</span>
                                             <span className="text-slate-700 dark:text-slate-300">{progress}%</span>
                                         </div>
                                         <div className="w-full bg-slate-100 dark:bg-white/5 h-1.5 rounded-full overflow-hidden shadow-inner">
-                                            <div className={`h-full transition-all duration-1000 ease-out ${getProgressBarColor(progress)}`} style={{ width: `${(item.step_reached / 7) * 100}%` }}></div>
+                                            <div
+                                                className={`h-full transition-all duration-1000 ease-out ${getProgressBarColor(progress)}`}
+                                                style={{ width: `${progress}%` }}
+                                            />
                                         </div>
                                     </div>
                                 </td>
+
+                                {/* HR Status */}
                                 <td className="px-8 py-5">
-                                    <FrictionReasoning step={item.step_reached} contractStatus={item.metadata?.contract_status} />
+                                    <FrictionReasoning step={item.step_reached} contractStatus={contractStatus} />
                                 </td>
+
+                                {/* Actions */}
                                 <td className="px-4 py-5 text-right">
                                     <div className="flex items-center justify-end gap-2">
-                                        <button 
+                                        <button
                                             onClick={() => handleNudge(item)}
-                                            disabled={!!actionInProgress}
+                                            disabled={!!actionInProgress || isComplete}
                                             className="p-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all disabled:opacity-30 shrink-0"
                                             title="Send WhatsApp Reminder"
                                         >
-                                            {actionInProgress === item.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                                            {actionInProgress === item.id
+                                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                                : <Send className="w-4 h-4" />
+                                            }
                                         </button>
-                                        <button 
+                                        <button
                                             onClick={() => handleEnterJourney(item)}
-                                            className={`px-4 py-2 font-black text-[9px] uppercase tracking-widest rounded-lg border transition-all shadow-sm whitespace-nowrap min-w-[90px] ${item.metadata?.contract_status === 'signed' ? 'bg-amber-500 text-white border-amber-600 hover:bg-amber-600 shadow-amber-500/20 animate-pulse' : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white hover:bg-[#0d9488] hover:text-white dark:hover:bg-[#0d9488] border-slate-200 dark:border-white/10'}`}
+                                            className={`px-4 py-2 font-black text-[9px] uppercase tracking-widest rounded-lg border transition-all shadow-sm whitespace-nowrap min-w-[100px] ${
+                                                needsCountersign
+                                                    ? 'bg-amber-500 text-white border-amber-600 hover:bg-amber-600 shadow-amber-500/20 animate-pulse'
+                                                    : isComplete
+                                                    ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100'
+                                                    : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white hover:bg-[#0d9488] hover:text-white dark:hover:bg-[#0d9488] border-slate-200 dark:border-white/10'
+                                            }`}
                                         >
-                                            {getActionLabel(item.step_reached, item.metadata?.contract_status)}
+                                            {getActionLabel(item.step_reached, contractStatus)}
                                         </button>
                                     </div>
                                 </td>
                             </tr>
                         );
                     }) : (
-                        <tr><td colSpan={5} className="py-20 text-center text-slate-400 text-[10px] font-black uppercase tracking-widest italic">No candidates found matching current filter.</td></tr>
+                        <tr>
+                            <td colSpan={5} className="py-20 text-center text-slate-400 text-[10px] font-black uppercase tracking-widest italic">
+                                No candidates found matching current filter.
+                            </td>
+                        </tr>
                     )}
                 </tbody>
             </table>
