@@ -119,11 +119,12 @@ export class WestFlowClient {
     return this.call('AIVA', 'get_pipeline', {});
   }
 
-  async createNewHire(name: string, phone?: string, position?: string, jobDescription?: string, jobDescriptionUrl?: string) {
+  async createNewHire(name: string, phone?: string, position?: string, jobDescription?: string, jobDescriptionUrl?: string, suppressNotification: boolean = false) {
     return this.call('AIVA', 'create_new_hire', {
       name,
       phone: phone ? phone.replace(/\D/g, '') : null,
       position: position || 'Technical Specialist',
+      suppress_notification: suppressNotification,
       metadata: {
         job_description: jobDescription,
         job_description_url: jobDescriptionUrl
@@ -174,9 +175,9 @@ export class WestFlowClient {
     return this.call('AIVA', 'get_contract', { hire_id: hireId });
   }
 
-  async countersignContract(contractId: string, countersignerName: string = 'Deon Boshoff', pdfPath?: string) {
+  async countersignContract(hireId: string, countersignerName: string = 'Deon Boshoff', pdfPath?: string) {
     return this.call('AIVA', 'countersign_contract', {
-      contract_id: contractId,
+      hire_id: hireId,          // orchestrator expects hire_id, not contract_id
       countersigner_name: countersignerName,
       pdf_path: pdfPath
     });

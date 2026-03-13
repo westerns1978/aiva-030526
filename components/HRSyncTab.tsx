@@ -155,11 +155,11 @@ const EmployeeCard: React.FC<{
                         <img
                             src={meta.profile_photo_url}
                             alt={record.staff_name}
-                            className="w-14 h-14 rounded-xl object-cover border-2 border-slate-100 dark:border-white/10"
+                            className="w-20 h-20 rounded-2xl object-cover border-2 border-[#0d9488]/30 shadow-md"
                         />
                     ) : (
-                        <div className="w-14 h-14 rounded-xl bg-[#0d9488]/10 border-2 border-[#0d9488]/20 flex items-center justify-center">
-                            <User className="w-6 h-6 text-[#0d9488]" />
+                        <div className="w-20 h-20 rounded-2xl bg-[#0d9488]/10 border-2 border-[#0d9488]/20 flex items-center justify-center">
+                            <User className="w-8 h-8 text-[#0d9488]" />
                         </div>
                     )}
                     {/* Status dot */}
@@ -295,11 +295,20 @@ const EmployeeCard: React.FC<{
                                     <FileText className="w-3 h-3" /> Documents
                                 </p>
                                 <div className="space-y-2">
+                                    <DocLink label="Completion Packet (PDF)" url={meta.completion_pdf_path ? `${SUPABASE_URL}/storage/v1/object/public/project-aiva-afridroids/${meta.completion_pdf_path}` : undefined} signed={true} />
                                     <DocLink label="Employment Contract" url={meta.countersigned_pdf_path || meta.signed_pdf_path} signed={!!meta.countersigned_pdf_path} />
                                     <DocLink label="Offer Letter" url={docs.offer?.signed_url} signed={docs.offer?.status === 'signed'} />
                                     <DocLink label="Job Description" url={docs.job_description?.signed_url} signed={docs.job_description?.status === 'signed'} />
                                     <DocLink label="Commission Manual" url={docs.commission_manual?.signed_url} signed={docs.commission_manual?.status === 'signed'} />
                                     <DocLink label="Performance Policy" url={docs.performance_policy?.signed_url} signed={docs.performance_policy?.status === 'signed'} />
+                                    {meta.export_errors && meta.export_errors.length > 0 && (
+                                        <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl">
+                                            <p className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-1">⚠️ Export Warnings</p>
+                                            {meta.export_errors.map((err: string, i: number) => (
+                                                <p key={i} className="text-[9px] text-amber-700 dark:text-amber-400 font-mono">{err}</p>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

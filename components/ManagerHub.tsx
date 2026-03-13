@@ -8,6 +8,7 @@ import {
     CloseIcon,
 } from './icons';
 import { westflow } from '../services/westflowClient';
+import { stampCountersignature } from '../utils/pdfStamper';
 import { useAppContext } from '../context/AppContext';
 
 const GROUP_JID = '120363423479055395@g.us'; // Aiva Testing Crew — Dan, Deon, Derek
@@ -263,75 +264,318 @@ export const ManagerHub: React.FC = () => {
         setHubActiveTab(tab);
     }
 
-    const handleCountersign = async (hire: any) => {
-        setIsRefreshing(true);
+    const handleResendLink = async (hire: any) => {
         try {
-            const signerName = currentUser?.name || 'Deon Boshoff';
-            
-            // Try orchestrator first
-            let success = false;
-            try {
-                const result = await westflow.countersignContract(hire.id, signerName, hire.metadata?.signed_pdf_path);
-                success = !!result?.success;
-            } catch (orchErr) {
-                console.warn('[Countersign] Orchestrator failed, falling back to direct patch:', orchErr);
+            const phone = hire.phone?.replace(/\D/g, '');
+            if (!phone) { addToast('No phone number on file for this hire', 'error'); return; }
+            // Re-derive the same deterministic PIN used in QrCodeGenerator
+            const hirePin = String(parseInt(hire.id.replace(/-/g, '').slice(-6), 16)).slice(-6).padStart(6, '0');
+            const baseUrl = window.location.origin;
+            const onboardLink = `${baseUrl}/?session=${hire.id}&pin=${hirePin}`;
+            const name = (hire.staff_name || 'Team Member').split(' ')[0];
+            const message = `Hi ${name}! 👋 Here's your Nashua Paarl onboarding link:\n\n🔑 PIN: ${hirePin}\n🔗 ${onboardLink}\n\nPick up where you left off — you're on Step ${hire.step_reached} of 8!`;
+            await westflow.sendWhatsAppNotification(phone, message);
+            triggerSuccessFeedback(`Onboarding link resent to ${hire.staff_name}`);
+        } catch (e) {
+            addToast('Failed to resend link', 'error');
+        }
+    };
+
+    // ── Export function — lifted from OnboardingJourney so it runs server-side
+    // from ManagerHub immediately after countersign. No employee browser needed.
+    const exportOnboardingRecord = async (hireId: string) => {
+        try {
+            const getResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
+                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+            );
+            const data = await getResp.json();
+            if (!data || data.length === 0) throw new Error('Hire record not found');
+            const hireRecord = data[0];
+            const meta = hireRecord.metadata || {};
+
+            if (meta.contract_status !== 'countersigned') {
+                console.warn('[export] Skipping — contract not yet countersigned'); return;
+            }
+            if (meta.export_completed) {
+                console.log('[export] Already exported — skipping'); return;
             }
 
-            // Fallback: direct Supabase PATCH if orchestrator fails
-            if (!success) {
-                console.log('[Countersign] Direct Supabase PATCH fallback...');
-                const currentMeta = hire.metadata || {};
-                const updatedMeta = {
-                    ...currentMeta,
-                    contract_status: 'countersigned',
-                    countersigned_at: new Date().toISOString(),
-                    countersigned_by: signerName,
-                    countersigner_name: signerName,
-                };
-                const patchResp = await fetch(
-                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hire.id}`,
-                    {
-                        method: 'PATCH',
+            const empName     = hireRecord.staff_name || 'Employee';
+            const employeeNum = hireRecord.id.slice(0, 8).toUpperCase();
+
+            const sageRow = {
+                Employee_Number:                employeeNum,
+                Surname:                        meta.surname || empName.split(' ').slice(1).join(' ') || '',
+                First_Names:                    meta.first_names || empName.split(' ')[0] || '',
+                ID_Number:                      meta.identity_number || '',
+                Date_Of_Birth:                  meta.date_of_birth || '',
+                Residency_Status:               meta.residency_status || '',
+                Race_EEA:                       meta.race || '',
+                Drivers_Licence:                meta.drivers_licence_number || '',
+                Cell_Number:                    hireRecord.phone || meta.cell_number || '',
+                Email:                          meta.email_address || '',
+                Street_Address:                 meta.home_address_line_1 || '',
+                Suburb:                         meta.home_address_suburb || '',
+                City:                           meta.home_address_city || '',
+                Province:                       meta.home_address_province || '',
+                Postal_Code:                    meta.postal_code || '',
+                Bank_Name:                      meta.bank_name || '',
+                Branch_Name:                    meta.branch_name || '',
+                Branch_Code:                    meta.branch_code || '',
+                Account_Number:                 meta.account_number || '',
+                Account_Type:                   meta.account_type || '',
+                Account_Holder:                 meta.account_holder_name || empName,
+                Emergency_Contact_Name:         meta.emergency_contact_name || '',
+                Emergency_Contact_Phone:        meta.emergency_contact_phone || '',
+                Emergency_Contact_Relationship: meta.emergency_contact_relationship || '',
+                Tax_Number:                     meta.income_tax_number || '',
+                Start_Date:                     meta.start_date || new Date().toISOString().split('T')[0],
+                Position:                       meta.job_description || 'Sales Executive',
+                Department:                     'Sales',
+                Branch:                         meta.branch || 'Nashua Paarl & West Coast',
+                Employment_Status:              'Active',
+                Contract_Status:                'Countersigned',
+                Countersigned_By:               meta.countersigner_name || 'Deon Boshoff',
+                Countersigned_At:               meta.countersigned_at || new Date().toISOString(),
+                Onboarding_Completed_At:        new Date().toISOString(),
+                AIVA_Hire_ID:                   hireRecord.id,
+            };
+
+            const csvContent = [
+                Object.keys(sageRow).join(','),
+                Object.values(sageRow).map(v => `"${String(v ?? '').replace(/"/g, '\'\'')}"`).join(','),
+            ].join('\n');
+
+            const csvPath = `hr-exports/${hireId}/sage_export.csv`;
+            await fetch(
+                `${SUPABASE_URL}/storage/v1/object/project-aiva-afridroids/${csvPath}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'text/csv',
+                        'x-upsert': 'true',
+                    },
+                    body: new Blob([csvContent], { type: 'text/csv' }),
+                }
+            );
+
+            const finalPdfUrl = meta.countersigned_pdf_url
+                || (meta.countersigned_pdf_path
+                    ? `${SUPABASE_URL}/storage/v1/object/public/project-aiva-afridroids/${meta.countersigned_pdf_path}`
+                    : meta.signed_pdf_url || null);
+
+            if (finalPdfUrl) {
+                try {
+                    await fetch(`${SUPABASE_URL}/rest/v1/uploaded_files`, {
+                        method: 'POST',
                         headers: {
                             'apikey': SUPABASE_KEY,
                             'Authorization': `Bearer ${SUPABASE_KEY}`,
                             'Content-Type': 'application/json',
-                            'Prefer': 'return=minimal'
+                            'Prefer': 'return=minimal',
                         },
-                        body: JSON.stringify({ 
-                            metadata: updatedMeta,
-                            status: 'COMPLETED'
-                        })
-                    }
-                );
-                success = patchResp.ok;
-                if (!success) {
-                    throw new Error(`Direct patch failed: ${patchResp.status}`);
+                        body: JSON.stringify({
+                            file_name:       `Employment_Contract_Countersigned_${empName.replace(/\s+/g, '_')}.pdf`,
+                            file_path:       meta.countersigned_pdf_path || `contracts/${hireId}/final`,
+                            file_type:       'application/pdf',
+                            file_size:       0,
+                            public_url:      finalPdfUrl,
+                            hire_id:         hireId,
+                            app_id:          'aiva',
+                            document_type:   'countersigned_contract',
+                            document_status: 'countersigned',
+                            uploaded_by:     'aiva-export',
+                            uploaded_at:     new Date().toISOString(),
+                        }),
+                    });
+                } catch (vaultErr) {
+                    console.warn('[export] uploaded_files registration failed (non-blocking):', vaultErr);
                 }
             }
 
-            if (success) {
-                triggerSuccessFeedback("Contract Countersigned.");
+            const freshMetaResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
+                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+            );
+            const freshMetaData = await freshMetaResp.json();
+            const existingMeta  = freshMetaData?.[0]?.metadata || {};
 
-                // Notify employee via WhatsApp
+            await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({
+                    metadata: {
+                        ...existingMeta,
+                        sage_csv_path:       csvPath,
+                        final_pdf_url:       finalPdfUrl,
+                        export_completed:    true,
+                        export_completed_at: new Date().toISOString(),
+                    },
+                    status: 'COMPLETED',
+                }),
+            });
+
+            await fetch(`${SUPABASE_URL}/rest/v1/hr_export_log`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({
+                    hire_id:       hireId,
+                    exported_at:   new Date().toISOString(),
+                    target_system: 'sage_hr',
+                    status:        'pending_sync',
+                    payload:       sageRow,
+                    csv_path:      csvPath,
+                }),
+            });
+
+            const employeePhone = hireRecord.phone?.replace(/\D/g, '');
+            const firstName     = empName.split(' ')[0];
+            if (employeePhone) {
                 try {
-                    const empPhone = hire.phone?.replace(/\D/g, '');
-                    const empName = (hire.staff_name || 'Team Member').split(' ')[0];
-                    if (empPhone) {
-                        await westflow.sendWhatsAppNotification(empPhone,
-                            `🎉 Congratulations ${empName}!\n\nYour employment contract has been countersigned by ${signerName}.\n\nYou are now officially part of the team! Welcome to Nashua. 🌟\n\nYour signed documents will be sent to you shortly.`
-                        );
-                    }
+                    await westflow.sendWhatsAppNotification(employeePhone, [
+                        `🎉 *Welcome to Nashua Paarl, ${firstName}!*`,
+                        ``,
+                        `Your employment contract has been countersigned by the Managing Director. You are officially onboard!`,
+                        ``,
+                        `📄 *Your signed contract:*`,
+                        finalPdfUrl || `Log in to AIVA to download your documents.`,
+                        ``,
+                        `Your start date: *${sageRow.Start_Date}*`,
+                        `Position: *${sageRow.Position}*`,
+                        ``,
+                        `Welcome to the team! 🚀`,
+                    ].join('\n'));
                 } catch (waErr) {
-                    console.warn('[Countersign] Employee WhatsApp failed:', waErr);
+                    console.warn('[export] Employee WhatsApp failed:', waErr);
+                }
+            }
+
+            try {
+                await westflow.sendWhatsAppNotification('120363423479055395@g.us', [
+                    `✅ *Onboarding Complete — ${empName}*`,
+                    ``,
+                    `📋 Role: ${sageRow.Position}`,
+                    `🏢 Branch: ${sageRow.Branch}`,
+                    `📄 Contract: Countersigned ✅`,
+                    `👤 Ref: ${employeeNum}`,
+                    ``,
+                    `Sage HR import file is ready.`,
+                ].join('\n'));
+            } catch (waErr) {
+                console.warn('[export] Manager group WhatsApp failed:', waErr);
+            }
+
+            console.log('[export] ✅ Complete — CSV uploaded, PDF vaulted, WhatsApp sent');
+        } catch (error) {
+            console.error('[exportOnboardingRecord] Error:', error);
+        }
+    };
+
+    const handleCountersign = async (hire: any) => {
+        setIsRefreshing(true);
+        try {
+            const signerName = currentUser?.name || 'Deon Boshoff';
+            const meta = hire.metadata || {};
+            const employeeName = hire.staff_name || 'Employee';
+            const signedAt = meta.contract_signed_at || new Date().toISOString();
+            const signatureMethod = meta.signature_method || 'styled';
+            const countersignedAt = new Date().toISOString();
+
+            // ── Step 1: Stamp the countersignature onto the employee-signed PDF ────
+            let countersignedPdfPath: string | null = null;
+            let countersignedPdfUrl: string | null = null;
+
+            const sourcePdfUrl = meta.signed_pdf_url
+                || (meta.signed_pdf_path
+                    ? `${SUPABASE_URL}/storage/v1/object/public/project-aiva-afridroids/${meta.signed_pdf_path}`
+                    : null)
+                || 'https://storage.googleapis.com/gemynd-public/projects/aiva/Employment%20Contract%20Template_3.pdf';
+
+            try {
+                const stampResult = await stampCountersignature({
+                    hireId: hire.id,
+                    sourcePdfUrl,
+                    countersignerName: signerName,
+                    countersignedAt,
+                    employeeName,
+                    signedAt,
+                    signatureMethod,
+                });
+                if (stampResult.success) {
+                    countersignedPdfPath = stampResult.storagePath;
+                    countersignedPdfUrl  = stampResult.pdfUrl;
+                    console.log('[Countersign] ✅ PDF stamped →', countersignedPdfUrl);
+                } else {
+                    console.warn('[Countersign] Stamp failed (non-blocking):', stampResult.error);
+                }
+            } catch (stampErr) {
+                console.warn('[Countersign] stampCountersignature threw (non-blocking):', stampErr);
+            }
+
+            // ── Step 2: Persist countersign status — single atomic PATCH ────────
+            // Orchestrator removed: it was overwriting stamped PDF paths with
+            // stale data, causing countersigned_pdf_url = null downstream.
+            const updatedMeta = {
+                ...meta,
+                contract_status:       'countersigned',
+                countersigned_at:      countersignedAt,
+                countersigned_by:      signerName,
+                countersigner_name:    signerName,
+                final_pdf_url:         countersignedPdfUrl || meta.signed_pdf_url || null,
+                ...(countersignedPdfPath && { countersigned_pdf_path: countersignedPdfPath }),
+                ...(countersignedPdfUrl  && { countersigned_pdf_url:  countersignedPdfUrl  }),
+            };
+
+            const patchResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hire.id}`,
+                {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=minimal',
+                    },
+                    body: JSON.stringify({ metadata: updatedMeta, status: 'COMPLETED' }),
+                }
+            );
+            const success = patchResp.ok;
+            if (!success) throw new Error(`Direct patch failed: ${patchResp.status}`);
+
+            if (success) {
+                triggerSuccessFeedback('Contract Countersigned.');
+
+                // ── Step 3: Fire export immediately — no browser dependency ──────
+                // exportOnboardingRecord used to rely on the employee's realtime
+                // listener in OnboardingJourney. Moved here so it always fires
+                // from ManagerHub right after countersign, regardless of whether
+                // the employee's session is open.
+                try {
+                    await exportOnboardingRecord(hire.id);
+                } catch (exportErr) {
+                    console.warn('[Countersign] Export failed (non-blocking):', exportErr);
                 }
 
                 // Notify dispatching manager if different from who countersigned
                 try {
-                    const dispatcherPhone = hire.metadata?.manager_phone;
+                    const dispatcherPhone = meta.manager_phone;
                     const myPhone = MANAGER_PHONES[currentUser?.employeeNumber || ''];
                     if (dispatcherPhone && dispatcherPhone !== myPhone) {
-                        await westflow.sendWhatsAppNotification(dispatcherPhone,
+                        await westflow.sendWhatsAppNotification(
+                            dispatcherPhone,
                             `✅ ${hire.staff_name} onboarding complete!\n\nCountersigned by ${signerName}.\n\nSage HR export ready.`
                         );
                     }
@@ -341,11 +585,11 @@ export const ManagerHub: React.FC = () => {
 
                 fetchDashboardData();
             } else {
-                addToast("Countersign failed — please try again.", "error");
+                addToast('Countersign failed — please try again.', 'error');
             }
         } catch (e: any) {
             console.error('[Countersign] Error:', e);
-            addToast(`Countersign failed: ${e?.message || 'Unknown error'}`, "error");
+            addToast(`Countersign failed: ${e?.message || 'Unknown error'}`, 'error');
         } finally {
             setIsRefreshing(false);
         }
@@ -436,13 +680,8 @@ export const ManagerHub: React.FC = () => {
                                                             <button
                                                                 onClick={() => {
                                                                     const CONTRACT_TEMPLATE = 'https://storage.googleapis.com/gemynd-public/projects/aiva/Employment%20Contract%20Template_3.pdf';
-                                                                    const signedPath = hire.metadata?.signed_pdf_path;
-                                                                    // Only use signed_pdf_path if it's valid — reject /documents/ paths (stale bad data)
-                                                                    if (signedPath && !signedPath.includes('/documents/') && signedPath.includes('storage.googleapis.com')) { 
-                                                                        openMedia(signedPath); 
-                                                                    } else { 
-                                                                        openMedia(CONTRACT_TEMPLATE); 
-                                                                    }
+                                                                    const signedUrl = hire.metadata?.signed_pdf_url;
+                                                                    openMedia(signedUrl || CONTRACT_TEMPLATE);
                                                                 }}
                                                                 className="px-3 py-2 bg-slate-100 dark:bg-white/5 text-slate-500 hover:text-slate-700 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all"
                                                             >
@@ -470,12 +709,24 @@ export const ManagerHub: React.FC = () => {
                                             </h3>
                                             <div className="space-y-1">
                                                 {metrics.stalledList.map((hire: any) => (
-                                                    <HireRow key={hire.id} hire={hire} formatTime={formatTimeAgo} actionLabel="Nudge" variant="warning"
-                                                        onAction={async () => {
-                                                            try { await westflow.nudgeHire(hire.id); triggerSuccessFeedback(`Reminder sent to ${hire.staff_name}`); }
-                                                            catch(e) { addToast("Send failed", "error"); }
-                                                        }}
-                                                    />
+                                                    <div key={hire.id} className="flex items-center gap-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <HireRow hire={hire} formatTime={formatTimeAgo} actionLabel="Nudge" variant="warning"
+                                                                onAction={async () => {
+                                                                    try { await westflow.nudgeHire(hire.id); triggerSuccessFeedback(`Reminder sent to ${hire.staff_name}`); }
+                                                                    catch(e) { addToast("Send failed", "error"); }
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <button
+                                                            onClick={() => handleResendLink(hire)}
+                                                            title="Resend onboarding link via WhatsApp"
+                                                            className="shrink-0 px-3 py-1.5 bg-[#0d9488]/10 text-[#0d9488] border border-[#0d9488]/20 hover:bg-[#0d9488] hover:text-white rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5"
+                                                        >
+                                                            <Send className="w-3 h-3" />
+                                                            Resend
+                                                        </button>
+                                                    </div>
                                                 ))}
                                             </div>
                                         </div>

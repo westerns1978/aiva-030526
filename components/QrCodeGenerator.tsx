@@ -199,7 +199,8 @@ const DispatchModal: React.FC<DispatchModalProps> = ({ worker, onClose }) => {
                 phone, 
                 'Team Member',
                 selectedJD?.title,
-                selectedJD?.file_url
+                selectedJD?.file_url,
+                true // suppress_notification — we send our own template below
             );
             
             if (!hireResp.success) {
@@ -212,7 +213,10 @@ const DispatchModal: React.FC<DispatchModalProps> = ({ worker, onClose }) => {
             setDispatchedId(hireId);
 
             const cleanPhone = phone.replace(/\D/g, '');
-            const onboardLink = `${window.location.origin}/#onboard/${hireId}`;
+            // ── Derive 6-digit PIN from hireId — same algorithm everywhere ──
+            const hirePin = String(parseInt(hireId.replace(/-/g, '').slice(-6), 16)).slice(-6).padStart(6, '0');
+            // Include PIN in the link so tapping WhatsApp auto-authenticates — no typing needed
+            const onboardLink = `${window.location.origin}/?session=${hireId}&pin=${hirePin}`;
 
             // Save onboard link + dispatch metadata — merge with existing
             const existingResp = await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`, {
@@ -248,7 +252,7 @@ const DispatchModal: React.FC<DispatchModalProps> = ({ worker, onClose }) => {
                 })
             });
 
-            // Send nashua_welcome template with name and onboarding link
+            // Send nashua_welcome template — 2 body params: name + link (PIN baked into URL)
             const templateResult = await westflow.call('AIVA', 'send_whatsapp_template', {
                 phone: cleanPhone,
                 template_name: "nashua_welcome",
@@ -283,9 +287,9 @@ const DispatchModal: React.FC<DispatchModalProps> = ({ worker, onClose }) => {
 
     // In-person mode: after dispatch, show fullscreen QR for employee to scan
     if (showInPersonQR && dispatchedId) {
-        const onboardLink = `${window.location.origin}/#onboard/${dispatchedId}`;
         // 6-digit PIN derived from hireId — last 6 hex chars → decimal
         const pin = String(parseInt(dispatchedId.replace(/-/g, '').slice(-6), 16)).slice(-6).padStart(6, '0');
+        const onboardLink = `${window.location.origin}/?session=${dispatchedId}&pin=${pin}`;
         
         return (
             <div className="fixed inset-0 z-[200] bg-slate-950 flex flex-col items-center justify-center p-6 animate-fadeIn">
@@ -588,7 +592,9 @@ const InPersonRegistration: React.FC = () => {
     }, [activeSession]);
 
     const handleBeginInPerson = async (hire: any) => {
-        const pin = String(Math.floor(1000 + Math.random() * 9000));
+        // ── Always derive PIN from hireId — same algorithm as dispatch QR ──
+        // This ensures the PIN shown on screen matches what's embedded in the QR URL
+        const pin = String(parseInt(hire.id.replace(/-/g, '').slice(-6), 16)).slice(-6).padStart(6, '0');
         const expiresAtDate = new Date(Date.now() + 15 * 60 * 1000);
         const expiresAtTimestamp = expiresAtDate.getTime();
         

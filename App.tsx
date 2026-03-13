@@ -258,6 +258,7 @@ const MainAppContent: React.FC = () => {
             <PinConfirmationScreen 
                 hireId={activeSessionId} 
                 expectedPin={expectedPin} 
+                autoVerify={true}
                 onSuccess={() => {
                     // Success is handled inside the component via context updates
                 }} 

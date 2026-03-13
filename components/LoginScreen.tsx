@@ -8,8 +8,6 @@ interface LoginScreenProps {
     onDemoBypass: (role: 'employee' | 'manager') => void;
 }
 
-type LoginTab = 'password' | 'ivalt';
-
 const QUICK_SELECT = [
     { name: 'Deon',  role: 'MD',  email: 'deon@afridroids.com' },
     { name: 'Dan',   role: 'CVO', email: 'dan.western@gemyndflow.com' },
@@ -17,7 +15,6 @@ const QUICK_SELECT = [
 ];
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onKioskMode, onDemoBypass }) => {
-    const [tab, setTab] = useState<LoginTab>('password');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -71,131 +68,88 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onKioskMode, 
                 {/* Card */}
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-[0_32px_128px_rgba(0,0,0,0.08)] p-6 shadow-2xl">
 
-                    {/* Tabs */}
-                    <div className="flex bg-slate-100 p-1 rounded-xl mb-6 gap-1 border border-slate-200">
-                        <button
-                            onClick={() => { setTab('password'); setError(null); }}
-                            className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5
-                                ${tab === 'password' ? 'bg-[#0d9488] text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                            <Mail className="w-3 h-3" /> Email & Password
-                        </button>
-                        <button
-                            onClick={() => { setTab('ivalt'); setError(null); }}
-                            className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5
-                                ${tab === 'ivalt' ? 'bg-[#0d9488] text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                            <Shield className="w-3 h-3" /> iValt
-                        </button>
-                    </div>
-
-                    {/* Password Login */}
-                    {tab === 'password' && (
-                        <form onSubmit={handlePasswordLogin} className="space-y-4">
-                            {/* Quick select */}
-                            <div>
-                                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Quick Select</p>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {QUICK_SELECT.map(({ name, role, email: e }) => (
-                                        <button
-                                            key={name}
-                                            type="button"
-                                            onClick={() => quickFill(e)}
-                                            className={`py-2.5 px-1 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all flex flex-col items-center gap-0.5
-                                                ${email === e
-                                                    ? 'bg-[#0d9488]/10 border-[#0d9488] text-[#0d9488]'
-                                                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-[#0d9488]/50 hover:text-slate-700'
-                                                }`}
-                                        >
-                                            <span>{name}</span>
-                                            <span className={`text-[7px] font-bold tracking-widest ${email === e ? 'text-[#0d9488]/70' : 'text-slate-400'}`}>{role}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Email */}
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Email</label>
-                                <div className="flex items-center bg-slate-50 rounded-xl border border-slate-200 focus-within:border-[#0d9488] transition-all overflow-hidden">
-                                    <div className="px-3 py-3 text-slate-500"><Mail className="w-4 h-4" /></div>
-                                    <input
-                                        type="email"
-                                        value={email}
-                                        onChange={e => { setEmail(e.target.value); setError(null); }}
-                                        placeholder="you@afridroids.com"
-                                        className="flex-1 bg-transparent py-3 pr-4 text-slate-900 text-sm outline-none placeholder:text-slate-300"
-                                        autoComplete="email"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Password */}
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Password</label>
-                                <div className="flex items-center bg-slate-50 rounded-xl border border-slate-200 focus-within:border-[#0d9488] transition-all overflow-hidden">
-                                    <div className="px-3 py-3 text-slate-500"><Lock className="w-4 h-4" /></div>
-                                    <input
-                                        type={showPassword ? 'text' : 'password'}
-                                        value={password}
-                                        onChange={e => { setPassword(e.target.value); setError(null); }}
-                                        placeholder="••••••••"
-                                        className="flex-1 bg-transparent py-3 text-slate-900 text-sm outline-none placeholder:text-slate-300"
-                                        autoComplete="current-password"
-                                    />
+                    <form onSubmit={handlePasswordLogin} className="space-y-4">
+                        {/* Quick select */}
+                        <div>
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Quick Select</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {QUICK_SELECT.map(({ name, role, email: e }) => (
                                     <button
+                                        key={name}
                                         type="button"
-                                        onClick={() => setShowPassword(!showPassword)}
-                                        className="px-3 py-3 text-slate-400 hover:text-slate-600 transition-colors"
+                                        onClick={() => quickFill(e)}
+                                        className={`py-2.5 px-1 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all flex flex-col items-center gap-0.5
+                                            ${email === e
+                                                ? 'bg-[#0d9488]/10 border-[#0d9488] text-[#0d9488]'
+                                                : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-[#0d9488]/50 hover:text-slate-700'
+                                            }`}
                                     >
-                                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        <span>{name}</span>
+                                        <span className={`text-[7px] font-bold tracking-widest ${email === e ? 'text-[#0d9488]/70' : 'text-slate-400'}`}>{role}</span>
                                     </button>
-                                </div>
+                                ))}
                             </div>
-
-                            {/* Error */}
-                            {error && (
-                                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5">
-                                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                                    <p className="text-[10px] text-red-400 font-bold">{error}</p>
-                                </div>
-                            )}
-
-                            {/* Submit */}
-                            <button
-                                type="submit"
-                                disabled={isLoading || !email || !password}
-                                className="w-full bg-[#0d9488] hover:bg-[#0f766e] text-white py-3.5 rounded-xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl shadow-[#0d9488]/20 disabled:opacity-40 flex items-center justify-center gap-2 border-b-4 border-[#0a6660] active:border-b-0 active:translate-y-0.5"
-                            >
-                                {isLoading
-                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</>
-                                    : <><ChevronRight className="w-4 h-4" /> Sign In</>
-                                }
-                            </button>
-                        </form>
-                    )}
-
-                    {/* iValt */}
-                    {tab === 'ivalt' && (
-                        <div className="space-y-4 text-center">
-                            <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200">
-                                <Shield className="w-12 h-12 text-[#0d9488] mx-auto mb-3" />
-                                <p className="text-slate-900 font-black text-sm uppercase italic tracking-tight">iValt Biometric Auth</p>
-                                <p className="text-slate-500 text-xs mt-2 leading-relaxed">
-                                    Open the iValt app on your phone and approve the login request.
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => onDemoBypass('manager')}
-                                className="w-full bg-[#0d9488] text-white py-3.5 rounded-xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl shadow-[#0d9488]/20 flex items-center justify-center gap-2"
-                            >
-                                <Shield className="w-4 h-4" /> Launch iValt
-                            </button>
-                            <p className="text-slate-400 text-[9px]">
-                                Having issues? Switch to Email & Password tab above.
-                            </p>
                         </div>
-                    )}
+
+                        {/* Email */}
+                        <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Email</label>
+                            <div className="flex items-center bg-slate-50 rounded-xl border border-slate-200 focus-within:border-[#0d9488] transition-all overflow-hidden">
+                                <div className="px-3 py-3 text-slate-500"><Mail className="w-4 h-4" /></div>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={e => { setEmail(e.target.value); setError(null); }}
+                                    placeholder="you@afridroids.com"
+                                    className="flex-1 bg-transparent py-3 pr-4 text-slate-900 text-sm outline-none placeholder:text-slate-300"
+                                    autoComplete="email"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Password */}
+                        <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Password</label>
+                            <div className="flex items-center bg-slate-50 rounded-xl border border-slate-200 focus-within:border-[#0d9488] transition-all overflow-hidden">
+                                <div className="px-3 py-3 text-slate-500"><Lock className="w-4 h-4" /></div>
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={e => { setPassword(e.target.value); setError(null); }}
+                                    placeholder="••••••••"
+                                    className="flex-1 bg-transparent py-3 text-slate-900 text-sm outline-none placeholder:text-slate-300"
+                                    autoComplete="current-password"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="px-3 py-3 text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Error */}
+                        {error && (
+                            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5">
+                                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                                <p className="text-[10px] text-red-400 font-bold">{error}</p>
+                            </div>
+                        )}
+
+                        {/* Submit */}
+                        <button
+                            type="submit"
+                            disabled={isLoading || !email || !password}
+                            className="w-full bg-[#0d9488] hover:bg-[#0f766e] text-white py-3.5 rounded-xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl shadow-[#0d9488]/20 disabled:opacity-40 flex items-center justify-center gap-2 border-b-4 border-[#0a6660] active:border-b-0 active:translate-y-0.5"
+                        >
+                            {isLoading
+                                ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</>
+                                : <><ChevronRight className="w-4 h-4" /> Sign In</>
+                            }
+                        </button>
+                    </form>
                 </div>
 
                 {/* Employee kiosk button */}

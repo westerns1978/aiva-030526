@@ -1,19 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
     X, 
-    CheckCircle2, 
     FileText, 
     ChevronLeft, 
     Loader2, 
     Signature, 
     Fingerprint, 
     Download,
-    Camera,
-    Lock
+    Camera
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { storageService } from '../services/storageService';
-import { westflow } from '../services/westflowClient';
 import { useAppContext } from '../context/AppContext';
 import { SignatureCapture, type SignatureResult } from './SignatureCapture';
 
@@ -32,9 +29,6 @@ interface PolicyPacketFlowProps {
     onClose: () => void;
 }
 
-const SUPABASE_URL = 'https://ldzzlndsspkyohvzfiiu.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkenpsbmRzc3BreW9odnpmaWl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3MTEzMDUsImV4cCI6MjA3NzI4NzMwNX0.SK2Y7XMzeGQoVMq9KAmEN1vwy7RjtbIXZf6TyNneFnI';
-
 export const PolicyPacketFlow: React.FC<PolicyPacketFlowProps> = ({ documents, hireName, hireId, onComplete, onClose }) => {
     const { addToast, triggerSuccessFeedback, currentHire } = useAppContext();
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -46,7 +40,6 @@ export const PolicyPacketFlow: React.FC<PolicyPacketFlowProps> = ({ documents, h
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const currentDoc = documents[currentIndex];
-    const progress = ((currentIndex + 1) / documents.length) * 100;
     // For the JD doc, use the hire-specific job_description_url if available (correct role JD),
     // otherwise fall back to the generic Sales JD template in GCS.
     const pdfUrl = (currentDoc.key === 'job_description' && currentHire?.metadata?.job_description_url)
@@ -160,7 +153,7 @@ export const PolicyPacketFlow: React.FC<PolicyPacketFlowProps> = ({ documents, h
                 };
                 onComplete(metadataUpdate);
             }
-        } catch (e) {
+        } catch {
             addToast("Signing failed. Please retry.", "error");
         } finally {
             setIsExecuting(false);
@@ -201,7 +194,7 @@ export const PolicyPacketFlow: React.FC<PolicyPacketFlowProps> = ({ documents, h
                     }
                 });
             }
-        } catch (e) {
+        } catch {
             addToast("Upload failed.", "error");
         } finally {
             setIsExecuting(false);

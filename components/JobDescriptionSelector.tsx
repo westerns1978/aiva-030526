@@ -72,7 +72,11 @@ export const JobDescriptionSelector: React.FC<JobDescriptionSelectorProps> = ({
   const toggleDept = (dept: string) => {
     setExpandedDepts(prev => {
       const next = new Set(prev);
-      next.has(dept) ? next.delete(dept) : next.add(dept);
+      if (next.has(dept)) {
+        next.delete(dept);
+      } else {
+        next.add(dept);
+      }
       return next;
     });
   };

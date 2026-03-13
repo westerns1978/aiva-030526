@@ -176,10 +176,10 @@ export const AivaUnifiedChat: React.FC<{ isOpen: boolean; onClose: () => void }>
         }
     }, [messages, liveModelTranscript, liveUserTranscript]);
 
-    const handleConnectVoice = async (withVideo = false) => {
+    const handleConnectVoice = useCallback(async (withVideo = false) => {
         setMode('voice');
         await startConversation(withVideo);
-    };
+    }, [startConversation]);
 
     const handleSwitchToText = () => {
         stopConversation();
@@ -190,7 +190,7 @@ export const AivaUnifiedChat: React.FC<{ isOpen: boolean; onClose: () => void }>
         if (isOpen && mode === 'voice' && !isAivaLiveActive) {
             handleConnectVoice();
         }
-    }, [isOpen]);
+    }, [isOpen, mode, isAivaLiveActive, handleConnectVoice]);
 
     const handleSendText = async (msgText?: string) => {
         const text = msgText || inputText;

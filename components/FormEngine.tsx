@@ -32,10 +32,45 @@ export const FormEngine: React.FC<FormEngineProps> = ({ form, onClose, onSubmit,
     const [isSigned, setIsSigned] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const firstInputRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(null);
+    const autosaveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const formDataRef = useRef(formData);
+
+    // Keep ref in sync so interval always reads latest data
+    useEffect(() => { formDataRef.current = formData; }, [formData]);
 
     useEffect(() => {
         firstInputRef.current?.focus();
     }, []);
+
+    // ── Autosave draft to localStorage every 30s ──────────────────────────────
+    useEffect(() => {
+        const key = `aiva_form_draft_${form.id || stepNumber}`;
+        // Restore draft on mount if initial data is empty
+        const draft = localStorage.getItem(key);
+        if (draft && Object.values(initialData).every(v => !v)) {
+            try {
+                const parsed = JSON.parse(draft);
+                // Use a small timeout to avoid synchronous setState in effect
+                setTimeout(() => {
+                    setFormData(prev => ({ ...parsed, ...prev }));
+                }, 0);
+            } catch { /* ignore corrupt draft */ }
+        }
+
+        autosaveRef.current = setInterval(() => {
+            const current = formDataRef.current;
+            if (Object.values(current).some(v => v !== '' && v !== null && v !== undefined)) {
+                try {
+                    localStorage.setItem(key, JSON.stringify(current));
+                } catch { /* storage full — ignore */ }
+            }
+        }, 30_000);
+
+        return () => {
+            if (autosaveRef.current) clearInterval(autosaveRef.current);
+            try { localStorage.removeItem(key); } catch { /* ignore */ }
+        };
+    }, [form.id, stepNumber, initialData]);
 
     const isFieldVisible = (field: FormField) => {
         if (!field.condition) return true;
@@ -99,7 +134,6 @@ export const FormEngine: React.FC<FormEngineProps> = ({ form, onClose, onSubmit,
 
     const renderField = (field: FormField, idx: number) => {
         const error = errors[field.id];
-        const isWarning = field.validation === 'sa_id' && error;
         
         return (
             <div key={field.id} className="space-y-2 group">

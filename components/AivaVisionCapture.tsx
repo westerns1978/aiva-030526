@@ -186,7 +186,7 @@ export const AivaVisionCapture: React.FC<AivaVisionCaptureProps> = ({
         try {
             await track.applyConstraints({ advanced: [{ torch: !torchOn } as any] });
             setTorchOn(!torchOn);
-        } catch (err) {
+        } catch {
             console.warn('[AivaVision] Torch not available');
         }
     };

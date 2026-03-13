@@ -17,7 +17,11 @@ export const ManagerSelect: React.FC<ManagerSelectProps> = ({ onSelect }) => {
     const [selected, setSelected] = useState<string | null>(null);
 
     const handleLogin = (empNum: string) => {
-        try { localStorage.setItem('aiva-manager-id', empNum); } catch(e) {}
+        try { 
+            localStorage.setItem('aiva-manager-id', empNum); 
+        } catch(e) {
+            console.warn("Failed to save manager ID to localStorage", e);
+        }
         setSelected(empNum);
         setTimeout(() => {
             setPersona('manager');

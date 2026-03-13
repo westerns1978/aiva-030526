@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ONBOARDING_STEPS, GCS_REGISTRY, languageOptions } from '../constants';
 import { useAppContext } from '../context/AppContext';
+import { useOfflineStatus } from '../hooks/useOfflineStatus';
 import { 
     CheckCircleIcon, 
     AiSparkIcon, 
     BanknoteIcon,
-    ClipboardDocumentListIcon,
-    HeartIcon,
     PencilSquareIcon,
     ClockIcon
 } from './icons';
@@ -17,8 +16,9 @@ import { HR_FORMS } from '../constants/hrForms';
 import { westflow } from '../services/westflowClient';
 import { storageService } from '../services/storageService';
 import { realtimeService } from '../services/realtimeService';
-import { Scan, Signature, Monitor, Loader2, AlertCircle, ShieldCheck, User, MapPin, Zap, CheckCircle2, FileSignature, Package, Smartphone, Maximize2 } from 'lucide-react';
+import { Scan, Signature, Monitor, Loader2, AlertCircle, Zap, CheckCircle2, FileSignature, Package, Smartphone, Maximize2 } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { stampEmployeeSignature } from '../utils/pdfStamper';
 import { SignatureCapture, type SignatureResult } from './SignatureCapture';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,8 +29,7 @@ const ProfilePhotoCapture: React.FC<{
     onComplete: (url: string | null) => void;
     hireName: string;
     hireId: string;
-    currentMetadata: any;
-}> = ({ onComplete, hireName, hireId, currentMetadata }) => {
+}> = ({ onComplete, hireName, hireId }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const [captureState, setCaptureState] = useState<'preview' | 'review' | 'uploading'>('preview');
@@ -38,7 +37,7 @@ const ProfilePhotoCapture: React.FC<{
     const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    const startCamera = async () => {
+    const startCamera = useCallback(async () => {
         try {
             setError(null);
             const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -52,7 +51,7 @@ const ProfilePhotoCapture: React.FC<{
             console.error('Camera access denied:', err);
             setError("We need camera access for your staff photo. You can skip this and add it later.");
         }
-    };
+    }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -274,61 +273,7 @@ const LanguageSwitcher: React.FC<{
     );
 };
 
-const WelcomeScreen: React.FC<{ hireName: string; profilePhotoUrl: string | null }> = ({ hireName, profilePhotoUrl }) => (
-    <div className="text-center space-y-8 max-w-lg mx-auto animate-fadeIn py-8">
-        <div className="space-y-2">
-            <div className="text-6xl animate-bounce">🎉</div>
-            <h2 className="text-3xl font-black text-slate-900 dark:text-white uppercase italic tracking-tighter">
-                Welcome to the Team!
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-                Congratulations {(hireName || 'Team Member').split(' ')[0]}, your onboarding is complete.
-            </p>
-        </div>
-
-        {profilePhotoUrl && (
-            <div className="flex justify-center">
-                <div className="relative group">
-                    <img src={profilePhotoUrl} alt="" 
-                        className="w-32 h-32 rounded-full object-cover border-4 border-[#0d9488] shadow-2xl transition-transform duration-700 group-hover:scale-105" />
-                    <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-white p-1.5 rounded-full border-4 border-white dark:border-slate-900 shadow-lg">
-                        <CheckCircle2 className="w-4 h-4" />
-                    </div>
-                </div>
-            </div>
-        )}
-
-        <div className="bg-slate-50 dark:bg-slate-800 rounded-[2.5rem] p-8 text-left space-y-5 border border-slate-200 dark:border-white/10 shadow-inner">
-            <h4 className="text-[10px] font-black text-[#0d9488] uppercase tracking-[0.3em] mb-2 px-1">What Happens Next</h4>
-            <div className="space-y-4">
-                <div className="flex items-start gap-4">
-                    <div className="p-2 bg-teal-50 dark:bg-teal-500/10 rounded-lg"><ShieldCheck className="w-4 h-4 text-[#0d9488]" /></div>
-                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 leading-tight mt-1">Your Manager has been notified to review your final file.</p>
-                </div>
-                <div className="flex items-start gap-4">
-                    <div className="p-2 bg-teal-50 dark:bg-teal-500/10 rounded-lg"><FileSignature className="w-4 h-4 text-[#0d9488]" /></div>
-                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 leading-tight mt-1">Your Employment Contract will be countersigned by management.</p>
-                </div>
-                <div className="flex items-start gap-4">
-                    <div className="p-2 bg-teal-50 dark:bg-teal-500/10 rounded-lg"><Smartphone className="w-4 h-4 text-[#0d9488]" /></div>
-                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 leading-tight mt-1">A final signed copy will be sent to you via WhatsApp.</p>
-                </div>
-                <div className="flex items-start gap-4">
-                    <div className="p-2 bg-teal-50 dark:bg-teal-500/10 rounded-lg"><Package className="w-4 h-4 text-[#0d9488]" /></div>
-                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 leading-tight mt-1">Your IT access and equipment will be prepared for your start date.</p>
-                </div>
-            </div>
-        </div>
-
-        <div className="pt-8 border-t border-slate-200 dark:border-white/5 space-y-4">
-            <img src="https://storage.googleapis.com/gemynd-public/projects/aiva/AfriDroids2%20(1).png" 
-                 alt="" className="h-10 mx-auto opacity-30 grayscale hover:opacity-50 transition-opacity" />
-            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.4em]">
-                AIVA • Nashua Paarl
-            </p>
-        </div>
-    </div>
-);
+// Removed WelcomeScreen
 
 // ─── Upload Step Panel ────────────────────────────────────────────────────────
 const UploadStepPanel: React.FC<{
@@ -563,10 +508,12 @@ const StepCard: React.FC<{
     isActive: boolean; 
     isCompleted: boolean; 
     currentHire: any;
+    profilePhotoUrl?: string | null;
     onExecute: (mode: 'vision' | 'import' | 'form' | 'handshake' | 'provision' | 'execution' | 'invite' | 'review' | 'packet' | 'upload') => void;
     onSkip: () => void;
     onFinalize: () => void;
-}> = ({ step, index, isActive, isCompleted, currentHire, onExecute, onSkip, onFinalize }) => {
+    onBriefing?: () => void;
+}> = ({ step, index, isActive, isCompleted, currentHire, profilePhotoUrl, onExecute, onSkip, onFinalize, onBriefing }) => {
     const cardRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -589,6 +536,18 @@ const StepCard: React.FC<{
                 <div className={`p-3 md:p-4 rounded-2xl shrink-0 transition-all duration-500 ${isCompleted ? 'bg-[#0d9488] shadow-md shadow-[#0d9488]/20' : isActive ? 'bg-[#0d9488] shadow-md shadow-[#0d9488]/30' : 'bg-slate-200 dark:bg-slate-700'}`}>
                     <step.icon className={`w-6 h-6 md:w-8 md:h-8 transition-colors ${isCompleted || isActive ? 'text-white' : 'text-slate-400'}`} />
                 </div>
+
+                {/* Profile photo badge — shown on the active step only */}
+                {isActive && profilePhotoUrl && (
+                    <div className="relative shrink-0 -ml-1">
+                        <img
+                            src={profilePhotoUrl}
+                            alt=""
+                            className="w-14 h-14 md:w-16 md:h-16 rounded-2xl object-cover border-2 border-[#0d9488]/40 shadow-md"
+                        />
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-800 shadow-sm" />
+                    </div>
+                )}
 
                 {step.actionType === 'review' && isActive && !isCompleted ? (
                     <div className="flex-1">
@@ -628,36 +587,78 @@ const StepCard: React.FC<{
                                     </div>
                                 );
                             } else if (isSigned) {
-                                return (
-                                    <div className="text-center space-y-6 py-4">
-                                        <div className="w-16 h-16 rounded-full bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center mx-auto">
-                                            <ClockIcon className="w-8 h-8 text-amber-500 animate-pulse" />
-                                        </div>
-                                        <div>
-                                            <h3 className="text-lg font-black text-slate-900 dark:text-white italic tracking-tight">
-                                                You're Done! 🎉
-                                            </h3>
-                                            <p className="text-[11px] font-bold text-[#0d9488] uppercase tracking-wider mt-1">Waiting for Deon to countersign</p>
-                                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-md mx-auto">
-                                                This usually takes just a few minutes. You can close this page — we'll send you a WhatsApp when everything is ready.
+                                const CountdownRing = () => {
+                                    const [countdown, setCountdown] = React.useState(15);
+                                    React.useEffect(() => {
+                                        const t = setInterval(() => setCountdown(c => c <= 1 ? 15 : c - 1), 1000);
+                                        return () => clearInterval(t);
+                                    }, []);
+                                    const pct = ((15 - countdown) / 15) * 100;
+                                    return (
+                                        <div className="text-center space-y-6 py-4">
+                                            {/* Animated ring with countdown */}
+                                            <div className="relative w-24 h-24 mx-auto">
+                                                <svg className="w-24 h-24 -rotate-90" viewBox="0 0 96 96">
+                                                    <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" strokeWidth="6" className="text-amber-100 dark:text-amber-900/30" />
+                                                    <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" strokeWidth="6"
+                                                        strokeDasharray={`${2 * Math.PI * 40}`}
+                                                        strokeDashoffset={`${2 * Math.PI * 40 * (1 - pct / 100)}`}
+                                                        strokeLinecap="round"
+                                                        className="text-amber-500 transition-all duration-1000"
+                                                    />
+                                                </svg>
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                                    <ClockIcon className="w-7 h-7 text-amber-500" />
+                                                    <span className="text-[11px] font-black text-amber-600 tabular-nums">{countdown}s</span>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h3 className="text-lg font-black text-slate-900 dark:text-white italic tracking-tight">
+                                                    You're Done! 🎉
+                                                </h3>
+                                                <p className="text-[11px] font-bold text-[#0d9488] uppercase tracking-wider mt-1">Waiting for Deon to countersign</p>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-md mx-auto">
+                                                    This usually takes just a few minutes. You can close this page — we'll send you a WhatsApp when everything is ready.
+                                                </p>
+                                                <div className="mt-3 flex items-center justify-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                                    <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>
+                                                    Checking every 15 seconds — this page will update automatically
+                                                </div>
+                                            </div>
+                                            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl text-left space-y-2 max-w-sm mx-auto">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">What happens next</p>
+                                                <p className="text-[11px] text-slate-600 dark:text-slate-300">1. Deon countersigns your contract</p>
+                                                <p className="text-[11px] text-slate-600 dark:text-slate-300">2. Your record is exported to Sage HR</p>
+                                                <p className="text-[11px] text-slate-600 dark:text-slate-300">3. You receive your signed documents on WhatsApp</p>
+                                            </div>
+                                            <p className="text-[9px] text-slate-400 dark:text-slate-500 italic">
+                                                Nothing more needed from you — you're almost officially on the team!
                                             </p>
-                                            <div className="mt-4 flex items-center justify-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-widest animate-pulse">
-                                                <div className="w-2 h-2 bg-amber-400 rounded-full"></div>
-                                                Checking every 15 seconds...
+                                        </div>
+                                    );
+                                };
+                                return <CountdownRing />;
+                            } else {
+                                // Check if employee has completed step7 (contract signed) — if so,
+                                // contract_status may not reflect yet. Show waiting state, not error.
+                                const step7Done = (currentHire?.metadata?.contract_status === 'signed') ||
+                                    document.querySelector('[data-step="step7"][data-completed="true"]') !== null;
+                                if (step7Done) {
+                                    return (
+                                        <div className="text-center space-y-4 py-4">
+                                            <div className="w-14 h-14 rounded-full bg-amber-500/10 border-2 border-amber-500/30 flex items-center justify-center mx-auto">
+                                                <ClockIcon className="w-7 h-7 text-amber-500 animate-pulse" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-base font-black text-slate-900 dark:text-white italic tracking-tight">You're Done! 🎉</h3>
+                                                <p className="text-[11px] font-bold text-[#0d9488] uppercase tracking-wider mt-1">Waiting for Deon to countersign</p>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-sm mx-auto">
+                                                    Nothing more needed from you — we'll send you a WhatsApp when your contract is fully signed.
+                                                </p>
                                             </div>
                                         </div>
-                                        <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl text-left space-y-2 max-w-sm mx-auto">
-                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">What happens next</p>
-                                            <p className="text-[11px] text-slate-600 dark:text-slate-300">1. Deon countersigns your contract</p>
-                                            <p className="text-[11px] text-slate-600 dark:text-slate-300">2. Your record is exported to Sage HR</p>
-                                            <p className="text-[11px] text-slate-600 dark:text-slate-300">3. You receive your signed documents on WhatsApp</p>
-                                        </div>
-                                        <p className="text-[9px] text-slate-400 dark:text-slate-500 italic">
-                                            Nothing more needed from you — you're almost officially on the team!
-                                        </p>
-                                    </div>
-                                );
-                            } else {
+                                    );
+                                }
                                 return (
                                     <div className="text-center space-y-4 py-4">
                                         <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -682,7 +683,20 @@ const StepCard: React.FC<{
                         <div className="flex-1 space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
                                 <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-[0.2em] ${isActive ? 'bg-[#0d9488] text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>Step 0{index + 1}</span>
-                                {isActive && !isCompleted && <span className="flex items-center gap-1.5 text-[8px] font-black text-[#0d9488] uppercase tracking-widest animate-pulse"><div className="w-1 h-1 rounded-full bg-[#0d9488]"></div> AIVA assisting</span>}
+                                {isActive && !isCompleted && (
+                                    <>
+                                        <span className="flex items-center gap-1.5 text-[8px] font-black text-[#0d9488] uppercase tracking-widest animate-pulse"><div className="w-1 h-1 rounded-full bg-[#0d9488]"></div> AIVA assisting</span>
+                                        {onBriefing && (
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); onBriefing(); }}
+                                                className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest hover:bg-amber-200 transition-all border border-amber-200/50"
+                                            >
+                                                <Zap className="w-2.5 h-2.5 fill-current" />
+                                                AIVA Briefing
+                                            </button>
+                                        )}
+                                    </>
+                                )}
                             </div>
                             <h4 className="font-black uppercase text-base md:text-xl tracking-tighter italic text-slate-900 dark:text-white leading-tight">
                                 {step.title.split(': ')[1] || step.title}
@@ -770,67 +784,17 @@ const StepCard: React.FC<{
     );
 };
 
-const FinalReviewView: React.FC<{ hire: any; onFinalize: () => void; isSubmitting: boolean }> = ({ hire, onFinalize, isSubmitting }) => {
-    return (
-        <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-6 md:p-8 border-2 border-[#0d9488] shadow-xl animate-fadeIn space-y-6 max-w-3xl mx-auto">
-            <div className="flex items-center gap-4">
-                <div className="p-3 bg-[#0d9488] rounded-xl text-white shadow-lg"><ShieldCheck className="w-6 h-6" /></div>
-                <div>
-                    <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase italic tracking-tighter leading-none">Onboarding Summary</h3>
-                    <p className="text-[9px] text-[#0d9488] font-black uppercase tracking-[0.3em] mt-1.5">Your Progress</p>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-                {[
-                    { icon: Signature, label: "Offer Acceptance", status: "ACCEPTED" },
-                    { icon: User, label: "ID Verification", status: "VERIFIED" },
-                    { icon: MapPin, label: "Proof of Address", status: "RECEIVED" },
-                    { icon: BanknoteIcon, label: "Banking Info", status: "LINKED" },
-                    { icon: ClipboardDocumentListIcon, label: "Policy Packets", status: "SIGNED" },
-                    { icon: HeartIcon, label: "Benefits & Emergency", status: "SAVED" },
-                    { icon: Monitor, label: "Staff Profile", status: "READY" },
-                ].map((node, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-white/5">
-                        <div className="flex items-center gap-2">
-                            <node.icon className="w-3.5 h-3.5 text-slate-400" />
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{node.label}</span>
-                        </div>
-                        <span className="text-[8px] font-black uppercase tracking-widest text-[#0d9488]">{node.status}</span>
-                    </div>
-                ))}
-            </div>
-
-            <div className="p-5 bg-[#0d9488]/5 rounded-2xl border border-[#0d9488]/10 relative overflow-hidden">
-                <h4 className="text-[8px] font-black uppercase tracking-[0.3em] text-[#0d9488] mb-1">AIVA Note</h4>
-                <p className="text-[11px] font-medium text-slate-700 dark:text-slate-300 italic leading-relaxed">
-                    "I have checked all your documents and information. Everything looks perfect! Tap below to finalize your onboarding and notify HR."
-                </p>
-            </div>
-
-            <button 
-                onClick={onFinalize}
-                disabled={isSubmitting}
-                className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-3 uppercase tracking-widest text-xs border-b-4 border-emerald-700 transition-all disabled:opacity-50"
-            >
-                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                Finalize Onboarding
-            </button>
-        </div>
-    );
-};
 
 // ─── Completion Packet ────────────────────────────────────────────────────────
 interface CompletionPacketProps {
     hireName: string;
-    hireId: string;
     profilePhotoUrl: string | null;
     metadata: Record<string, any>;
     onGoHome: () => void;
     onDownloadPDF: () => void;
 }
 
-const CompletionPacket: React.FC<CompletionPacketProps> = ({ hireName, hireId, profilePhotoUrl, metadata, onGoHome, onDownloadPDF }) => {
+const CompletionPacket: React.FC<CompletionPacketProps> = ({ hireName, profilePhotoUrl, metadata, onGoHome, onDownloadPDF }) => {
     const firstName = hireName.split(' ')[0];
     const docs = metadata.documents || {};
 
@@ -1052,8 +1016,6 @@ const OnboardingJourney: React.FC = () => {
         addToast, 
         initiateContextualChat, 
         handleGoHome, 
-        isManager, 
-        setActiveView,
         language,
         setLanguage,
         kioskMode,
@@ -1064,9 +1026,14 @@ const OnboardingJourney: React.FC = () => {
     const [showPolicyPacket, setShowPolicyPacket] = useState(false);
     const [activeFormStep, setActiveFormStep] = useState<string | null>(null);
     const [isHydrating, setIsHydrating] = useState(true);
+    const isOffline = useOfflineStatus();
     const [syncStatus, setSyncStatus] = useState<string>('IDLE');
     const [syncFailed, setSyncFailed] = useState(false);
     const [pendingStepId, setPendingStepId] = useState<string | null>(null);
+    const [offlineQueue, setOfflineQueue] = useState<string[]>(() => {
+        // Restore any queued steps from a previous offline session
+        try { return JSON.parse(localStorage.getItem('aiva_offline_queue') || '[]'); } catch { return []; }
+    });
     const [showFinalReview, setShowFinalReview] = useState(false);
     const [showPhotoCapture, setShowPhotoCapture] = useState(false);
     const [showWelcome, setShowWelcome] = useState(false);
@@ -1110,7 +1077,7 @@ const OnboardingJourney: React.FC = () => {
     // Persist hireId whenever it resolves
     useEffect(() => {
         if (hireId && UUID_REGEX.test(hireId)) {
-            try { localStorage.setItem('aiva-active-hire-id', hireId); } catch (e) { /* Ignore storage errors */ }
+            try { localStorage.setItem('aiva-active-hire-id', hireId); } catch { /* Ignore storage errors */ }
         }
     }, [hireId]);
 
@@ -1196,12 +1163,12 @@ const OnboardingJourney: React.FC = () => {
                     setProfilePhotoUrl(capturedPhotoRef.current);
                 }
             }
-        } catch (e) {
+        } catch {
             setIsHydrating(false);
         } finally {
             setIsHydrating(false);
         }
-    }, [hireId]);
+    }, [hireId, setCurrentHire]);
 
     useEffect(() => {
         hydrateState();
@@ -1210,16 +1177,13 @@ const OnboardingJourney: React.FC = () => {
         // Kiosk mode: detect ?kiosk=1 URL param (for printed QR code on wall)
         if (window.location.search.includes('kiosk=1')) {
             setKioskMode(true);
-            try { (screen.orientation as any)?.lock?.('portrait'); } catch(e) { /* not supported */ }
+            try { (screen.orientation as any)?.lock?.('portrait'); } catch { /* not supported */ }
         }
 
         return () => clearTimeout(timer);
-    }, [hydrateState]);
+    }, [hydrateState, setKioskMode]);
 
     useEffect(() => {
-        const currentStepIndex = completedSteps.length;
-        const currentStep = ONBOARDING_STEPS[currentStepIndex] || null;
-        
         if (hireId && completedSteps.length >= 5) { // Listen from step 6 onwards — catch countersign at any point
             const checkContractStatus = async () => {
                 try {
@@ -1273,7 +1237,6 @@ const OnboardingJourney: React.FC = () => {
     const currentStepIndex = completedSteps.length;
     const progressPercent = Math.min(100, Math.round((completedSteps.length / ONBOARDING_STEPS.length) * 100));
     const currentStep = ONBOARDING_STEPS[currentStepIndex] || null;
-    const timeRemaining = Math.max(0, 14 - (completedSteps.length * 2));
 
     // ── Save form data flat into onboarding_telemetry.metadata ───────────────
     const saveFormDataToMetadata = useCallback(async (formData: Record<string, any>) => {
@@ -1314,10 +1277,43 @@ const OnboardingJourney: React.FC = () => {
         } catch (e) {
             console.error('[FormSave] Failed to save form data:', e);
         }
-    }, [hireId, setCurrentHire]);
+    }, [hireId, setCurrentHire, addToast]);
+
+    // ── Offline queue: persist to localStorage, drain when back online ──────────
+    useEffect(() => {
+        try { localStorage.setItem('aiva_offline_queue', JSON.stringify(offlineQueue)); } catch { /* ignore */ }
+    }, [offlineQueue]);
+
+    useEffect(() => {
+        if (!isOffline && offlineQueue.length > 0) {
+            // Back online — drain queued steps in order, with a small delay between each
+            const drain = async () => {
+                const queue = [...offlineQueue];
+                setOfflineQueue([]);
+                for (const stepId of queue) {
+                    await handleStepComplete(stepId);
+                    await new Promise(r => setTimeout(r, 400));
+                }
+                addToast(`✅ ${queue.length} step${queue.length > 1 ? 's' : ''} synced after reconnecting`, 'success');
+            };
+            drain();
+        }
+    }, [isOffline]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleStepComplete = useCallback(async (stepId: string) => {
         if (completedSteps.includes(stepId)) return;
+
+        // ── Offline guard: queue step and show banner, drain when reconnected ──
+        if (isOffline) {
+            if (!offlineQueue.includes(stepId)) {
+                const newQ = [...offlineQueue, stepId];
+                setOfflineQueue(newQ);
+                // Still advance UI optimistically so employee isn't blocked
+                setCompletedSteps(prev => prev.includes(stepId) ? prev : [...prev, stepId]);
+                addToast('📶 You\'re offline — step saved and will sync when you reconnect', 'warning');
+            }
+            return;
+        }
 
         const newCompleted = [...completedSteps, stepId];
         setCompletedSteps(newCompleted);
@@ -1419,7 +1415,7 @@ const OnboardingJourney: React.FC = () => {
         triggerSuccessFeedback("Progress saved.");
 
         // JD review now happens before Step 1 offer — no need to show again after step 6
-    }, [triggerSuccessFeedback, hireId, completedSteps, currentHire, identifiedName, profilePhotoUrl, setShowJDReview]);
+    }, [triggerSuccessFeedback, hireId, completedSteps, currentHire, identifiedName, profilePhotoUrl, addToast, isOffline, offlineQueue, syncFailed]);
 
     const handlePhotoComplete = (url: string | null) => {
         setShowPhotoCapture(false);
@@ -1778,71 +1774,77 @@ const OnboardingJourney: React.FC = () => {
 
     const exportOnboardingRecord = async (hireId: string) => {
         try {
+            // ── 1. Fetch fresh hire record ────────────────────────────────────
             const getResp = await fetch(
                 `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
                 { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
             );
             const data = await getResp.json();
-            if (!data || data.length === 0) throw new Error("Hire record not found");
+            if (!data || data.length === 0) throw new Error('Hire record not found');
             const hireRecord = data[0];
             const meta = hireRecord.metadata || {};
-            // Manager phone: from dispatch record, fallback to Dan (you)
-            const MANAGER_PHONE = '120363423479055395@g.us' // Aiva Testing Crew group — all managers see it live;
-            // ── Sage HR CSV — keys match hrForms field IDs saved flat to metadata ──
-            // Banking fields saved flat by FormEngine (not nested under banking_details)
+
+            // Guard: only export once countersigned
+            if (meta.contract_status !== 'countersigned') {
+                console.warn('[export] Skipping — contract not yet countersigned');
+                return;
+            }
+            // Guard: don't double-export
+            if (meta.export_completed) {
+                console.log('[export] Already exported — skipping');
+                return;
+            }
+
+            const empName      = hireRecord.staff_name || 'Employee';
+            const employeeNum  = hireRecord.id.slice(0, 8).toUpperCase();
+
+            // ── 2. Build single Sage HR CSV row ───────────────────────────────
             const sageRow = {
-                Employee_Number: hireRecord.id.slice(0, 8).toUpperCase(),
-                // Personal — from step2 hrForms field ids
-                Surname: meta.surname || (hireRecord.staff_name || '').split(' ').slice(1).join(' ') || '',
-                First_Names: meta.first_names || (hireRecord.staff_name || '').split(' ')[0] || '',
-                ID_Number: meta.identity_number || '',                    // hrForms: identity_number
-                Date_Of_Birth: meta.date_of_birth || '',
-                Residency_Status: meta.residency_status || '',
-                Race_EEA: meta.race || '',
-                Drivers_Licence: meta.drivers_licence_number || '',
-                // Contact
-                Cell_Number: hireRecord.phone || meta.cell_number || '',  // hrForms: cell_number
-                Email: meta.email_address || '',                           // hrForms: email_address
-                // Address — from step2 hrForms field ids
-                Street_Address: meta.home_address_line_1 || '',           // hrForms: home_address_line_1
-                Suburb: meta.home_address_suburb || '',                   // hrForms: home_address_suburb
-                City: meta.home_address_city || '',                       // hrForms: home_address_city
-                Province: meta.home_address_province || '',               // hrForms: home_address_province
-                Postal_Code: meta.postal_code || '',
-                // Banking — from step5 hrForms field ids (saved flat)
-                Bank_Name: meta.bank_name || '',                          // hrForms: bank_name
-                Branch_Name: meta.branch_name || '',                      // hrForms: branch_name
-                Branch_Code: meta.branch_code || '',                      // hrForms: branch_code
-                Account_Number: meta.account_number || '',                // hrForms: account_number
-                Account_Type: meta.account_type || '',                    // hrForms: account_type
-                Account_Holder: meta.account_holder_name || hireRecord.staff_name || '', // hrForms: account_holder_name
-                // Emergency contact — from step2 hrForms field ids
-                Emergency_Contact_Name: meta.emergency_contact_name || '',
-                Emergency_Contact_Phone: meta.emergency_contact_phone || '',
-                Emergency_Contact_Relationship: meta.emergency_contact_relationship || '',
-                // Tax & employment
-                Tax_Number: meta.income_tax_number || '',                 // hrForms: income_tax_number
-                Start_Date: meta.start_date || new Date().toISOString().split('T')[0],
-                Position: meta.job_description || 'Sales Executive',
-                Department: 'Sales',
-                Branch: meta.branch || 'Nashua Paarl & West Coast',
-                Employment_Status: 'Active',
-                Contract_Signed: meta.contract_status === 'countersigned' || meta.contract_status === 'signed' ? 'Yes' : 'No',
-                Onboarding_Completed_At: new Date().toISOString(),
-                AIVA_Hire_ID: hireRecord.id
+                Employee_Number:                    employeeNum,
+                Surname:                            meta.surname || empName.split(' ').slice(1).join(' ') || '',
+                First_Names:                        meta.first_names || empName.split(' ')[0] || '',
+                ID_Number:                          meta.identity_number || '',
+                Date_Of_Birth:                      meta.date_of_birth || '',
+                Residency_Status:                   meta.residency_status || '',
+                Race_EEA:                           meta.race || '',
+                Drivers_Licence:                    meta.drivers_licence_number || '',
+                Cell_Number:                        hireRecord.phone || meta.cell_number || '',
+                Email:                              meta.email_address || '',
+                Street_Address:                     meta.home_address_line_1 || '',
+                Suburb:                             meta.home_address_suburb || '',
+                City:                               meta.home_address_city || '',
+                Province:                           meta.home_address_province || '',
+                Postal_Code:                        meta.postal_code || '',
+                Bank_Name:                          meta.bank_name || '',
+                Branch_Name:                        meta.branch_name || '',
+                Branch_Code:                        meta.branch_code || '',
+                Account_Number:                     meta.account_number || '',
+                Account_Type:                       meta.account_type || '',
+                Account_Holder:                     meta.account_holder_name || empName,
+                Emergency_Contact_Name:             meta.emergency_contact_name || '',
+                Emergency_Contact_Phone:            meta.emergency_contact_phone || '',
+                Emergency_Contact_Relationship:     meta.emergency_contact_relationship || '',
+                Tax_Number:                         meta.income_tax_number || '',
+                Start_Date:                         meta.start_date || new Date().toISOString().split('T')[0],
+                Position:                           meta.job_description || 'Sales Executive',
+                Department:                         'Sales',
+                Branch:                             meta.branch || 'Nashua Paarl & West Coast',
+                Employment_Status:                  'Active',
+                Contract_Status:                    'Countersigned',
+                Countersigned_By:                   meta.countersigner_name || 'Deon Boshoff',
+                Countersigned_At:                   meta.countersigned_at || new Date().toISOString(),
+                Onboarding_Completed_At:            new Date().toISOString(),
+                AIVA_Hire_ID:                       hireRecord.id,
             };
 
-            const csvHeaders = Object.keys(sageRow).join(',');
-            const csvValues = Object.values(sageRow).map(val =>
-                `"${String(val ?? '').replace(/"/g, '""')}"`
-            ).join(',');
-            const csvContent = `${csvHeaders}\n${csvValues}`;
+            // Single file — fixed path so it upserts and never duplicates
+            const csvContent = [
+                Object.keys(sageRow).join(','),
+                Object.values(sageRow).map(v => `"${String(v ?? '').replace(/"/g, '\'\'')}"`).join(','),
+            ].join('\n');
 
-            // ── Upload CSV to Supabase Storage ────────────────────────────────
-            const timestamp = Date.now();
-            const csvBlob = new Blob([csvContent], { type: 'text/csv' });
-            const csvPath = `hr-exports/${hireId}/sage_export_${timestamp}.csv`;
-
+            // ── 3. Upload single Sage CSV ──────────────────────────────────────
+            const csvPath = `hr-exports/${hireId}/sage_export.csv`;
             await fetch(
                 `${SUPABASE_URL}/storage/v1/object/project-aiva-afridroids/${csvPath}`,
                 {
@@ -1851,80 +1853,140 @@ const OnboardingJourney: React.FC = () => {
                         'apikey': SUPABASE_KEY,
                         'Authorization': `Bearer ${SUPABASE_KEY}`,
                         'Content-Type': 'text/csv',
-                        'x-upsert': 'true'
+                        'x-upsert': 'true',
                     },
-                    body: csvBlob
+                    body: new Blob([csvContent], { type: 'text/csv' }),
                 }
             );
 
-            // ── Also save JSON payload for full record ─────────────────────
-            const jsonBlob = new Blob([JSON.stringify(sageRow, null, 2)], { type: 'application/json' });
-            await fetch(
-                `${SUPABASE_URL}/storage/v1/object/project-aiva-afridroids/hr-exports/${hireId}/onboarding_export.json`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'apikey': SUPABASE_KEY,
-                        'Authorization': `Bearer ${SUPABASE_KEY}`,
-                        'Content-Type': 'application/json',
-                        'x-upsert': 'true'
-                    },
-                    body: jsonBlob
+            // ── 4. Register countersigned PDF in uploaded_files vault ──────────
+            const finalPdfUrl = meta.countersigned_pdf_url
+                || (meta.countersigned_pdf_path
+                    ? `${SUPABASE_URL}/storage/v1/object/public/project-aiva-afridroids/${meta.countersigned_pdf_path}`
+                    : meta.signed_pdf_url || null);
+
+            if (finalPdfUrl) {
+                try {
+                    await fetch(`${SUPABASE_URL}/rest/v1/uploaded_files`, {
+                        method: 'POST',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal',
+                        },
+                        body: JSON.stringify({
+                            file_name:       `Employment_Contract_Countersigned_${empName.replace(/\s+/g, '_')}.pdf`,
+                            file_path:       meta.countersigned_pdf_path || `contracts/${hireId}/final`,
+                            file_type:       'application/pdf',
+                            file_size:       0,
+                            public_url:      finalPdfUrl,
+                            hire_id:         hireId,
+                            app_id:          'aiva',
+                            document_type:   'countersigned_contract',
+                            document_status: 'countersigned',
+                            uploaded_by:     'aiva-export',
+                            uploaded_at:     new Date().toISOString(),
+                        }),
+                    });
+                    console.log('[export] ✅ Countersigned PDF registered in uploaded_files');
+                } catch (vaultErr) {
+                    console.warn('[export] uploaded_files registration failed (non-blocking):', vaultErr);
                 }
+            }
+
+            // ── 5. Write export_completed to metadata ─────────────────────────
+            const freshMetaResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
+                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
             );
+            const freshMetaData = await freshMetaResp.json();
+            const existingMeta  = freshMetaData?.[0]?.metadata || {};
 
-            // ── Save export paths to telemetry metadata ────────────────────
-            try {
-                const getMetaResp = await fetch(
-                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
-                    { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
-                );
-                const metaData = await getMetaResp.json();
-                const existingMeta = metaData?.[0]?.metadata || {};
-                await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
-                    method: 'PATCH',
-                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-                    body: JSON.stringify({ metadata: { ...existingMeta, sage_csv_path: csvPath, export_completed: true, export_completed_at: new Date().toISOString() } })
-                });
-            } catch (metaErr) { console.warn('[export] metadata path save failed:', metaErr); }
+            await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({
+                    metadata: {
+                        ...existingMeta,
+                        sage_csv_path:       csvPath,
+                        final_pdf_url:       finalPdfUrl,
+                        export_completed:    true,
+                        export_completed_at: new Date().toISOString(),
+                    },
+                    status: 'COMPLETED',
+                }),
+            });
 
-            // ── Log to hr_export_log ──────────────────────────────────────
+            // ── 6. Log to hr_export_log ────────────────────────────────────────
             await fetch(`${SUPABASE_URL}/rest/v1/hr_export_log`, {
                 method: 'POST',
                 headers: {
                     'apikey': SUPABASE_KEY,
                     'Authorization': `Bearer ${SUPABASE_KEY}`,
                     'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal'
+                    'Prefer': 'return=minimal',
                 },
                 body: JSON.stringify({
-                    hire_id: hireId,
-                    exported_at: new Date().toISOString(),
+                    hire_id:       hireId,
+                    exported_at:   new Date().toISOString(),
                     target_system: 'sage_hr',
-                    status: 'pending_sync',
-                    payload: sageRow,
-                    csv_path: csvPath
-                })
+                    status:        'pending_sync',
+                    payload:       sageRow,
+                    csv_path:      csvPath,
+                }),
             });
 
-            // ── WhatsApp notification to manager ──────────────────────────
-            try {
-                const name = sageRow.First_Names || hireRecord.staff_name;
-                const message = `🎉 Onboarding Complete!\n\n*${hireRecord.staff_name}* has completed their onboarding at Nashua Paarl.\n\n📋 Role: ${sageRow.Position}\n🏢 Branch: ${sageRow.Branch}\n📄 Contract: ${sageRow.Contract_Signed === 'Yes' ? 'Signed ✅' : 'Pending ⏳'}\n\nSage HR import file is ready.\nRef: ${sageRow.Employee_Number}\n\nView in AIVA: ${window.location.origin}/admin`;
-                await westflow.sendWhatsAppNotification(MANAGER_PHONE, message);
-            } catch (waError) {
-                console.warn('[exportOnboardingRecord] WhatsApp failed:', waError);
+            // ── 7. WhatsApp to EMPLOYEE with final PDF download link ───────────
+            const employeePhone = hireRecord.phone?.replace(/\D/g, '');
+            const firstName     = empName.split(' ')[0];
+            if (employeePhone) {
+                const employeeMsg = [
+                    `🎉 *Welcome to Nashua Paarl, ${firstName}!*`,
+                    ``,
+                    `Your employment contract has been countersigned by the Managing Director. You are officially onboard!`,
+                    ``,
+                    `📄 *Your signed contract:*`,
+                    finalPdfUrl || `Log in to AIVA to download your documents.`,
+                    ``,
+                    `Your start date: *${sageRow.Start_Date}*`,
+                    `Position: *${sageRow.Position}*`,
+                    ``,
+                    `Welcome to the team! 🚀`,
+                ].join('\n');
+                try {
+                    await westflow.sendWhatsAppNotification(employeePhone, employeeMsg);
+                    console.log('[export] ✅ Employee WhatsApp sent');
+                } catch (waErr) {
+                    console.warn('[export] Employee WhatsApp failed:', waErr);
+                }
             }
 
-            // ── Auto-download CSV for employee ─────────────────────────────
-            const downloadUrl = URL.createObjectURL(csvBlob);
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = `Sage_Import_${(hireRecord.staff_name || 'Employee').replace(/\s+/g, '_')}_${timestamp}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(downloadUrl);
+            // ── 8. WhatsApp to manager group ───────────────────────────────────
+            try {
+                await westflow.sendWhatsAppNotification(
+                    '120363423479055395@g.us',
+                    [
+                        `✅ *Onboarding Complete — ${empName}*`,
+                        ``,
+                        `📋 Role: ${sageRow.Position}`,
+                        `🏢 Branch: ${sageRow.Branch}`,
+                        `📄 Contract: Countersigned ✅`,
+                        `👤 Ref: ${employeeNum}`,
+                        ``,
+                        `Sage HR import file is ready.`,
+                    ].join('\n')
+                );
+            } catch (waErr) {
+                console.warn('[export] Manager group WhatsApp failed:', waErr);
+            }
+
+            console.log('[export] ✅ Complete — 1 CSV, PDF vaulted, WhatsApp sent');
 
         } catch (error) {
             console.error('[exportOnboardingRecord] Error:', error);
@@ -1987,7 +2049,7 @@ const OnboardingJourney: React.FC = () => {
             }
 
             // Clear localStorage so stale hireId doesn't affect future sessions
-            try { localStorage.removeItem('aiva-active-hire-id'); } catch (e) { /* Ignore storage errors */ }
+            try { localStorage.removeItem('aiva-active-hire-id'); } catch { /* Ignore storage errors */ }
         } catch (e) {
             console.error('[OnboardingJourney] Finalize error:', e);
             addToast("Failed to finalize. Please try again.", "error");
@@ -2005,7 +2067,7 @@ const OnboardingJourney: React.FC = () => {
         return () => { delete (window as any).__AivaOnboarding; };
     }, [currentStep, handleStepComplete, hydrateState]);
 
-    const handleStepExecution = (mode: string) => {
+    const handleStepExecution = async (mode: string) => {
         if (!currentStep) return;
         if (mode === 'upload') setShowUploadPanel(true);
         else if (mode === 'vision') setIsDocHubOpen(true);
@@ -2017,43 +2079,110 @@ const OnboardingJourney: React.FC = () => {
         else if (mode === 'review') setShowFinalReview(true);
         else if (mode === 'packet') setShowPolicyPacket(true);
         else if (mode === 'execution') {
-            // For step 1 (Offer): show JD first if available, then generate offer PDF, then sign
-            if (currentStep.id === 'step1' && currentHire?.metadata?.job_description_url && !currentHire.metadata?.jd_pre_offer_viewed) {
-                setShowJDPreOffer(true);
-                return;
-            }
-
-            if (currentStep.id === 'step1' && currentHire && !currentHire.metadata?.offer_pdf_url) {
-                const meta = currentHire.metadata || {};
-                const name = identifiedName || currentHire.staff_name || 'Employee';
-                addToast('Generating your personalised offer letter...', 'info');
-                generateOfferPDF(meta, name, currentHire.id).then(url => {
-                    if (url) {
-                        fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${currentHire.id}`, {
-                            method: 'PATCH',
-                            headers: {
-                                'apikey': SUPABASE_KEY,
-                                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                                'Content-Type': 'application/json',
-                                'Prefer': 'return=minimal'
-                            },
-                            body: JSON.stringify({ metadata: { ...meta, offer_pdf_url: url } })
-                        }).then(() => {
-                            if (currentHire) currentHire.metadata = { ...meta, offer_pdf_url: url };
+            // ── Step 1: Offer signing ───────────────────────────────────────────────
+            if (currentStep.id === 'step1') {
+                // Show JD first if not yet viewed
+                if (currentHire?.metadata?.job_description_url && !currentHire.metadata?.jd_pre_offer_viewed) {
+                    setShowJDPreOffer(true);
+                    return;
+                }
+                // Generate personalised offer PDF if not yet done
+                if (currentHire && !currentHire.metadata?.offer_pdf_url) {
+                    const meta = currentHire.metadata || {};
+                    const name = identifiedName || currentHire.staff_name || 'Employee';
+                    addToast('Generating your personalised offer letter...', 'info');
+                    generateOfferPDF(meta, name, currentHire.id).then(url => {
+                        if (url) {
+                            fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${currentHire.id}`, {
+                                method: 'PATCH',
+                                headers: {
+                                    'apikey': SUPABASE_KEY,
+                                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                                    'Content-Type': 'application/json',
+                                    'Prefer': 'return=minimal'
+                                },
+                                body: JSON.stringify({ metadata: { ...meta, offer_pdf_url: url } })
+                            }).then(() => {
+                                if (currentHire) currentHire.metadata = { ...meta, offer_pdf_url: url };
+                                setShowSignCapture(true);
+                            });
+                        } else {
                             setShowSignCapture(true);
+                        }
+                    });
+                } else {
+                    setShowSignCapture(true);
+                }
+            }
+            // ── Step 7: Contract signing — reuse Step 1 signature automatically ────
+            else if (currentStep.id === 'step7') {
+                const meta = currentHire?.metadata || {};
+                const savedSigUrl = meta.offer_signature_url || meta.contract_signature_url;
+                const savedInitials = meta.offer_initials || meta.contract_initials;
+                const savedMethod = meta.signature_method || 'styled';
+                const signerName = identifiedName || currentHire?.staff_name || 'Employee';
+
+                if (savedSigUrl) {
+                    // ✅ Reuse Step 1 signature — no re-signing needed
+                    // Use sig as initials fallback if initials weren't captured
+                    const initialsUrl = savedInitials || savedSigUrl;
+                    addToast('Signing your employment contract...', 'info');
+
+                    // Persist contract sig fields
+                    await saveFormDataToMetadata({
+                        contract_signature_url: savedSigUrl,
+                        contract_initials:      initialsUrl,
+                        contract_signed_at:     new Date().toISOString(),
+                        contract_signed_by:     signerName,
+                        contract_status:        'signed',
+                    });
+
+                    // ── Stamp PDF FIRST, then mark step complete ─────────────
+                    // This ensures signed_pdf_path is written before Deon's
+                    // countersign panel can load the correct source document.
+                    addToast('Stamping your signature onto the contract...', 'info');
+                    const contractUrl = `${GCS_REGISTRY.BASE_URL}${currentStep.template}`;
+                    try {
+                        const result = await stampEmployeeSignature({
+                            hireId,
+                            sourcePdfUrl:      contractUrl,
+                            signatureDataUrl:  savedSigUrl,
+                            initialsDataUrl:   initialsUrl,
+                            signerName,
+                            signedAt:          new Date().toISOString(),
+                            signatureMethod:   savedMethod,
                         });
-                    } else {
-                        setShowSignCapture(true);
+                        if (result.success) {
+                            console.log('[pdfStamper] Contract stamped →', result.pdfUrl);
+                            await saveFormDataToMetadata({
+                                signed_pdf_url:           result.pdfUrl,
+                                signed_pdf_path:          result.storagePath,
+                                contract_document_hash:   result.documentHash,
+                                stamp_completed_at:       new Date().toISOString(),
+                            });
+                        } else {
+                            console.warn('[pdfStamper] Contract stamp failed (non-blocking):', result.error);
+                            await saveFormDataToMetadata({ stamp_error: result.error, stamp_failed_at: new Date().toISOString() });
+                        }
+                    } catch (stampErr) {
+                        console.error('[pdfStamper] Contract stamp threw (non-blocking):', stampErr);
+                        await saveFormDataToMetadata({ stamp_error: String(stampErr), stamp_failed_at: new Date().toISOString() });
                     }
-                });
-            } else {
-                // Step 7 (Contract) or step 1 with existing PDF — open directly
+
+                    // ── Now advance the step ──────────────────────────────────
+                    handleStepComplete('step7');
+                    addToast('Contract signed! Sending to Managing Director...', 'success');
+                } else {
+                    // Fallback: no step 1 sig saved — show capture (edge case)
+                    console.warn('[Step7] No saved signature found — falling back to SignatureCapture');
+                    setShowSignCapture(true);
+                }
+            }
+            else {
                 setShowSignCapture(true);
             }
         }
     };
-
-    const currentDocTemplate = currentStep?.template;
 
     const handleAivaBriefing = () => {
         if (!currentStep) return;
@@ -2076,7 +2205,6 @@ const OnboardingJourney: React.FC = () => {
                     hireId={hireId} 
                     hireName={identifiedName || 'New Hire'} 
                     onComplete={handlePhotoComplete} 
-                    currentMetadata={currentHire?.metadata || {}}
                 />
             )}
 
@@ -2085,7 +2213,7 @@ const OnboardingJourney: React.FC = () => {
                 // Commission manual is only relevant for sales/consultant roles
                 const jd = (currentHire?.metadata?.job_description || '').toLowerCase();
                 const isSalesRole = [
-                    'sales', 'consultant', 'executive', 'account', 'business development', 'bd'
+                    'sales', 'tele sales', 'sales consultant', 'sales executive', 'business development'
                 ].some(kw => jd.includes(kw));
 
                 const filteredDocs = (currentStep.templates as any[]).filter((doc: any) => {
@@ -2116,6 +2244,22 @@ const OnboardingJourney: React.FC = () => {
                     }}
                     onClose={() => setShowUploadPanel(false)}
                 />
+            )}
+            {/* Offline status banner */}
+            {isOffline && (
+                <div className="mx-4 mt-3 p-3 bg-slate-800 dark:bg-slate-700 border border-slate-600 rounded-2xl flex items-center gap-3 animate-fadeIn">
+                    <div className="w-8 h-8 rounded-full bg-slate-700 dark:bg-slate-600 flex items-center justify-center shrink-0">
+                        <span className="text-slate-300 text-sm">📶</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black text-white uppercase tracking-wider">You're offline</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5">
+                            {offlineQueue.length > 0
+                                ? `${offlineQueue.length} step${offlineQueue.length > 1 ? 's' : ''} queued — will sync when you reconnect`
+                                : 'Progress will save when your connection returns'}
+                        </p>
+                    </div>
+                </div>
             )}
             {/* Sync failure retry banner */}
             {syncFailed && pendingStepId && (
@@ -2166,40 +2310,63 @@ const OnboardingJourney: React.FC = () => {
                 />
             )}
 
-            {/* ✍️ Signature Capture — scroll-to-sign + drawn signature + typed initials */}
-            {showSignCapture && currentStep && (
+            {/* ✍️ Signature Capture — only shown for Step 1 (offer).
+                 Step 7 (contract) reuses the Step 1 signature automatically. */}
+            {showSignCapture && currentStep && (currentStep.id === 'step1' || currentStep.id === 'step7') && (
                 <SignatureCapture
                     signerName={identifiedName || currentHire?.staff_name || 'Employee'}
-                    documentTitle={currentStep.id === 'step1' ? 'Offer of Employment' : 'Employment Contract'}
-                    stepLabel={currentStep.id === 'step1' ? 'Step 1 of 8' : 'Step 7 of 8'}
+                    documentTitle="Offer of Employment"
+                    stepLabel="Step 1 of 8"
                     requireScroll={true}
                     scrollContentUrl={
-                        currentStep.id === 'step1'
-                            ? (currentHire?.metadata?.offer_pdf_url || `${GCS_REGISTRY.BASE_URL}${currentStep.template}`)
-                            : `${GCS_REGISTRY.BASE_URL}${currentStep.template}`
+                        currentHire?.metadata?.offer_pdf_url || `${GCS_REGISTRY.BASE_URL}${currentStep.template}`
                     }
-                    showInitials={currentStep.id === 'step7'}
+                    showInitials={true}
                     onComplete={(sig: SignatureResult) => {
                         setShowSignCapture(false);
-                        // Save signature data to metadata
-                        const sigFields: Record<string, any> = {
-                            signature_method: 'drawn',
-                        };
-                        if (currentStep.id === 'step1') {
-                            sigFields.offer_signature_url = sig.signatureDataUrl;
-                            sigFields.offer_signed_at = sig.timestamp;
-                            sigFields.offer_signed_by = sig.signerName;
-                        } else {
-                            sigFields.contract_signature_url = sig.signatureDataUrl;
-                            sigFields.contract_initials = sig.initials;
-                            sigFields.contract_signed_at = sig.timestamp;
-                            sigFields.contract_signed_by = sig.signerName;
-                        }
-                        saveFormDataToMetadata(sigFields);
+
+                        // ── Persist offer signature immediately ─────────────────────────
+                        // These same values will be reused automatically at Step 7
+                        saveFormDataToMetadata({
+                            signature_method: sig.method || 'drawn',
+                            offer_signature_url: sig.signatureDataUrl,
+                            offer_initials: sig.initials,
+                            offer_signed_at: sig.timestamp,
+                            offer_signed_by: sig.signerName,
+                            // Mirror to contract fields so Step 7 stamper can access them
+                            contract_signature_url: sig.signatureDataUrl,
+                            contract_initials: sig.initials,
+                        });
+
                         handleStepComplete(currentStep.id);
-                        if (currentStep.id === 'step7') {
-                            addToast('Contract signed! Sending to Managing Director...', 'success');
-                        }
+
+                        // ── Stamp offer PDF with signature ──────────────────────────────
+                        const offerSourceUrl = currentHire?.metadata?.offer_pdf_url
+                            || `${GCS_REGISTRY.BASE_URL}${currentStep.template}`;
+                        stampEmployeeSignature({
+                            hireId,
+                            sourcePdfUrl: offerSourceUrl,
+                            signatureDataUrl: sig.signatureDataUrl,
+                            initialsDataUrl: sig.initials,
+                            signerName: sig.signerName,
+                            signedAt: sig.timestamp,
+                            signatureMethod: sig.method || 'drawn',
+                        }).then(result => {
+                            if (result.success) {
+                                console.log('[pdfStamper] Offer stamped →', result.pdfUrl);
+                                saveFormDataToMetadata({
+                                    offer_signed_pdf_url: result.pdfUrl,
+                                    offer_signed_pdf_path: result.storagePath,
+                                    offer_document_hash: result.documentHash,
+                                });
+                            } else {
+                                console.warn('[pdfStamper] Offer stamp failed:', result.error);
+                                saveFormDataToMetadata({ offer_stamp_error: result.error });
+                            }
+                        }).catch(err => {
+                            console.error('[pdfStamper] Offer stamp error:', err);
+                            saveFormDataToMetadata({ offer_stamp_error: String(err) });
+                        });
                     }}
                     onCancel={() => setShowSignCapture(false)}
                 />
@@ -2231,22 +2398,25 @@ const OnboardingJourney: React.FC = () => {
             )}
 
             {profilePhotoUrl && !showWelcome && (
-                <div className="flex items-center gap-3 px-4 py-2 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-white/5 animate-fadeIn">
-                    <div className="relative">
+                <div className="flex items-center gap-4 px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-white/5 animate-fadeIn">
+                    <div className="relative shrink-0">
                         <img
                             src={profilePhotoUrl}
                             alt={identifiedName || 'Profile'}
-                            className="w-9 h-9 rounded-full object-cover border-2 border-[#0d9488] shadow-md"
+                            className="w-14 h-14 rounded-2xl object-cover border-2 border-[#0d9488] shadow-lg"
                         />
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900"></div>
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 shadow"></div>
                     </div>
-                    <div className="flex flex-col">
-                        <span className="text-[11px] font-black text-slate-700 dark:text-slate-200 tracking-tight leading-none">
+                    <div className="flex flex-col min-w-0">
+                        <span className="text-[13px] font-black text-slate-800 dark:text-white tracking-tight leading-none truncate">
                             {identifiedName || 'Team Member'}
                         </span>
-                        <span className="text-[9px] font-bold text-[#0d9488] uppercase tracking-widest mt-0.5">
+                        <span className="text-[9px] font-bold text-[#0d9488] uppercase tracking-widest mt-1">
                             {progressPercent}% Complete
                         </span>
+                        <div className="mt-1.5 h-1 w-32 bg-slate-200 dark:bg-white/10 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-[#0d9488] to-emerald-400 rounded-full transition-all duration-700" style={{ width: `${progressPercent}%` }} />
+                        </div>
                     </div>
                 </div>
             )}
@@ -2256,7 +2426,6 @@ const OnboardingJourney: React.FC = () => {
                     {showWelcome ? (
                         <CompletionPacket
                             hireName={identifiedName || 'Team Member'}
-                            hireId={hireId || ''}
                             profilePhotoUrl={profilePhotoUrl}
                             metadata={currentHire?.metadata || {}}
                             onGoHome={handleGoHome}
@@ -2272,9 +2441,11 @@ const OnboardingJourney: React.FC = () => {
                                     isActive={currentStepIndex === idx} 
                                     isCompleted={completedSteps.includes(step.id)} 
                                     currentHire={currentHire}
+                                    profilePhotoUrl={profilePhotoUrl}
                                     onExecute={handleStepExecution} 
                                     onSkip={() => handleStepComplete(step.id)}
                                     onFinalize={handleFinalize}
+                                    onBriefing={handleAivaBriefing}
                                 />
                             ))}
                         </>

@@ -250,7 +250,7 @@ export const MediaViewerModal: React.FC = () => {
 
         const badgeY = sigBaseY - 10;
         lastPage.drawRectangle({ x: sigX, y: badgeY, width: 130, height: 14, color: rgb(0.05, 0.58, 0.53), borderColor: rgb(0.04, 0.49, 0.45), borderWidth: 0.5 });
-        lastPage.drawText('✓ DIGITALLY SIGNED - AIVA', { x: sigX + 5, y: badgeY + 3, size: 7, font: helveticaBold, color: rgb(1, 1, 1) });
+        lastPage.drawText('[SIGNED] DIGITALLY SIGNED - AIVA', { x: sigX + 5, y: badgeY + 3, size: 7, font: helveticaBold, color: rgb(1, 1, 1) });
 
         if (!isCountersign) {
             lastPage.drawText('Nashua Paarl & West Coast | ECTA 2002 | POPIA 2013', { x: width / 2 - 110, y: 20, size: 6, font: helvetica, color: rgb(0.6, 0.6, 0.6) });
