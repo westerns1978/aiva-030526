@@ -39,6 +39,11 @@ export const AivaUnifiedChat: React.FC<{ isOpen: boolean; onClose: () => void }>
     
     const scrollRef = useRef<HTMLDivElement>(null);
     const chatRef = useRef<any>(null);
+    // Guard: prevents the auto-connect useEffect from firing more than once
+    // per open session. Without this, any re-render while isOpen && !isAivaLiveActive
+    // (e.g. during connection setup) causes startConversation to be called repeatedly,
+    // which tears down the audio session before it can establish.
+    const autoConnectFiredRef = useRef(false);
 
     // Fetch pipeline stats if manager to provide better context awareness
     useEffect(() => {
@@ -178,16 +183,24 @@ export const AivaUnifiedChat: React.FC<{ isOpen: boolean; onClose: () => void }>
 
     const handleConnectVoice = useCallback(async (withVideo = false) => {
         setMode('voice');
+        autoConnectFiredRef.current = true; // mark fired so effect doesn't double-trigger
         await startConversation(withVideo);
     }, [startConversation]);
 
     const handleSwitchToText = () => {
         stopConversation();
+        autoConnectFiredRef.current = false; // allow reconnect if user switches back to voice
         setMode('text');
     };
 
     useEffect(() => {
-        if (isOpen && mode === 'voice' && !isAivaLiveActive) {
+        if (!isOpen) {
+            // Reset guard when panel closes so next open reconnects cleanly
+            autoConnectFiredRef.current = false;
+            return;
+        }
+        if (mode === 'voice' && !isAivaLiveActive && !autoConnectFiredRef.current) {
+            autoConnectFiredRef.current = true;
             handleConnectVoice();
         }
     }, [isOpen, mode, isAivaLiveActive, handleConnectVoice]);

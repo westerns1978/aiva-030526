@@ -225,10 +225,13 @@ export const ManagerHub: React.FC = () => {
 
     const metrics = useMemo(() => {
         const now = new Date();
+        // A hire is only "Fully Onboarded" when the manager has countersigned.
+        // Checking countersigned_at prevents the "Attention Needed + Fully Onboarded
+        // simultaneously" bug where employee-signed contracts were counted as complete.
         const isCompleted = (h: any) => {
-            const status = h.status?.toLowerCase() || '';
             const contractStatus = h.metadata?.contract_status?.toLowerCase();
-            return status === 'completed' || status === 'contract_signed' || contractStatus === 'countersigned';
+            const countersignedAt = h.metadata?.countersigned_at;
+            return contractStatus === 'countersigned' && !!countersignedAt;
         };
         const inProgress = pipeline.filter(h => !isCompleted(h)).length;
         const completedCount = pipeline.filter(h => isCompleted(h)).length;
@@ -755,16 +758,74 @@ export const ManagerHub: React.FC = () => {
                     {hubActiveTab === 'induction' && (
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                             <div className={`${focusedHireId ? 'lg:col-span-7' : 'lg:col-span-12'}`}>
+                                {/* Countersign queue — always visible at top of Pipeline tab.
+                                    Previously unreachable: required clicking a hire row to set
+                                    focusedHireId before DocumentChecklist would appear. Now Deon
+                                    can action contracts directly without any extra navigation. */}
+                                {countersignList.length > 0 && (
+                                    <div className="mb-6 bg-white dark:bg-slate-800 rounded-2xl border border-amber-200 dark:border-amber-500/40 p-6">
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                                            <h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wider">
+                                                {countersignList.length} Contract{countersignList.length > 1 ? 's' : ''} Awaiting Your Signature
+                                            </h3>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {countersignList.map(hire => (
+                                                <div key={hire.id} className="flex items-center justify-between p-4 bg-amber-50/50 dark:bg-amber-500/5 rounded-xl border border-amber-100 dark:border-amber-500/10">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        {hire.metadata?.profile_photo_url ? (
+                                                            <img src={hire.metadata.profile_photo_url} alt="" className="w-9 h-9 rounded-full object-cover border border-amber-200 shrink-0" />
+                                                        ) : (
+                                                            <div className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 text-sm font-bold shrink-0">
+                                                                {hire.staff_name?.charAt(0)?.toUpperCase() || '?'}
+                                                            </div>
+                                                        )}
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-tight truncate">{hire.staff_name}</p>
+                                                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
+                                                                Signed {hire.metadata?.contract_signed_at
+                                                                    ? new Date(hire.metadata.contract_signed_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })
+                                                                    : formatTimeAgo(hire.updated_at)}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0 ml-4">
+                                                        <button
+                                                            onClick={() => {
+                                                                const signedUrl = hire.metadata?.signed_pdf_url;
+                                                                const CONTRACT_TEMPLATE = 'https://storage.googleapis.com/gemynd-public/projects/aiva/Employment%20Contract%20Template_3.pdf';
+                                                                openMedia(signedUrl || CONTRACT_TEMPLATE);
+                                                            }}
+                                                            className="p-2 bg-slate-100 dark:bg-white/5 text-slate-500 hover:text-slate-700 rounded-lg transition-all"
+                                                            title="Preview contract"
+                                                        >
+                                                            <Eye className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCountersign(hire)}
+                                                            disabled={isRefreshing}
+                                                            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[8px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 border-b-2 border-amber-700 active:border-b-0 disabled:opacity-50"
+                                                        >
+                                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                                            Countersign
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 <OnboardingPipeline />
                             </div>
                             {focusedHireId && focusedHire && (
                                 <div className="lg:col-span-5 animate-slide-in-right sticky top-24">
-                                    <DocumentChecklist 
-                                        hire={focusedHire} 
+                                    <DocumentChecklist
+                                        hire={focusedHire}
                                         onCountersign={() => {
                                             setCurrentHireId(focusedHire.id);
                                             handleCountersign(focusedHire);
-                                        }} 
+                                        }}
                                     />
                                 </div>
                             )}
