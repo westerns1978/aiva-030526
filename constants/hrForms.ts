@@ -381,4 +381,68 @@ export const HR_FORMS: Record<string, FormDefinition> = {
             label: 'I confirm that the banking details provided above are correct. I understand that incorrect details may delay my salary payment.',
         },
     },
+
+    // step5 is an alias for step4 (banking) — supports both old and new constants/index.ts step ordering
+    step5: {
+        id: 'banking_details',
+        title: 'Banking Details',
+        description: 'Your salary will be paid on the 25th of each month by bank transfer. All fields are required.',
+        sections: [
+            {
+                id: 'bank_info',
+                title: 'Bank Account Information',
+                fields: [
+                    {
+                        id: 'account_holder_name',
+                        label: 'Account Holder Name',
+                        type: 'text',
+                        required: true,
+                        helpText: 'Must exactly match the name registered with your bank',
+                    },
+                    {
+                        id: 'bank_name',
+                        label: 'Bank',
+                        type: 'select',
+                        required: true,
+                        options: ['ABSA', 'African Bank', 'Capitec', 'FNB', 'Investec', 'Nedbank', 'Standard Bank', 'TymeBank', 'Other'],
+                    },
+                    {
+                        id: 'branch_name',
+                        label: 'Branch Name',
+                        type: 'text',
+                        required: true,
+                        placeholder: 'e.g. Paarl, Cape Town CBD',
+                    },
+                    {
+                        id: 'branch_code',
+                        label: 'Branch Code',
+                        type: 'text',
+                        required: true,
+                        helpText: 'Universal codes: ABSA=632005 | Capitec=470010 | FNB=250655 | Nedbank=198765 | Standard Bank=051001 | TymeBank=678910 | African Bank=430000',
+                        placeholder: '6-digit branch code',
+                    },
+                    {
+                        id: 'account_number',
+                        label: 'Account Number',
+                        type: 'text',
+                        required: true,
+                        validation: 'numeric',
+                        placeholder: 'Numbers only — no spaces or dashes',
+                    },
+                    {
+                        id: 'account_type',
+                        label: 'Account Type',
+                        type: 'select',
+                        required: true,
+                        options: ['Cheque / Current', 'Savings', 'Transmission'],
+                    },
+                ],
+            },
+        ],
+        notice: 'Your banking details are kept strictly confidential and used solely for salary payment in accordance with POPIA.',
+        signature: {
+            required: true,
+            label: 'I confirm that the banking details provided above are correct. I understand that incorrect details may delay my salary payment.',
+        },
+    },
 };

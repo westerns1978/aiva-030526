@@ -13,6 +13,7 @@ import { jsPDF } from 'jspdf';
 import { storageService } from '../services/storageService';
 import { useAppContext } from '../context/AppContext';
 import { SignatureCapture, type SignatureResult } from './SignatureCapture';
+import { MobilePdfViewer } from './MobilePdfViewer';
 
 interface PolicyDoc {
     key: string;
@@ -247,9 +248,10 @@ export const PolicyPacketFlow: React.FC<PolicyPacketFlowProps> = ({ documents, h
             <main className="flex-1 relative bg-slate-900 flex flex-col">
                 <div className="flex-1 p-2 md:p-4 relative flex flex-col gap-2">
                     <div className="flex-1 relative">
-                        <iframe 
-                            src={`${pdfUrl}#toolbar=0`} 
-                            className="w-full h-full rounded-[2rem] border-4 border-white/5"
+                        <MobilePdfViewer 
+                            url={pdfUrl} 
+                            className="w-full h-full"
+                            title={currentDoc.name}
                         />
                     </div>
                 </div>

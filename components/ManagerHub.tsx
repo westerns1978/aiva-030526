@@ -32,8 +32,8 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 type HubTab = 'matrix' | 'induction' | 'dispatch' | 'vault';
 
-const STEP_LABELS = ['Offer Acceptance', 'ID Verification', 'Proof of Residence', 'Banking Details', 'Policy Packets', 'Employment Contract', 'Final Review'];
-const STEP_COLORS = ['#f59e0b', '#3b82f6', '#8b5cf6', '#06b6d4', '#f97316', '#6366f1', '#10b981'];
+const STEP_LABELS = ['Offer Acceptance', 'ID Verification', 'Proof of Residence', 'Banking Details', 'Policy Acknowledgments', 'Policy Packets', 'Employment Contract', 'Final Review'];
+const STEP_COLORS = ['#f59e0b', '#3b82f6', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#6366f1', '#10b981'];
 
 const LiveMetric: React.FC<{ 
     value: number | string; 
@@ -172,11 +172,22 @@ export const ManagerHub: React.FC = () => {
     const fetchDashboardData = useCallback(async () => {
         setIsRefreshing(true);
         try {
-            const [pipelineRes, activityRes] = await Promise.all([
-                westflow.getOnboardingPipeline(),
+            // Fetch pipeline DIRECTLY from Supabase — bypass Westflow which
+            // filters out COMPLETED rows, causing countersign candidates to vanish.
+            const [pipelineResp, activityRes] = await Promise.all([
+                fetch(
+                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?order=created_at.desc&limit=100`,
+                    { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+                ),
                 telemetryService.getConversationLogs('AIVA', 15)
             ]);
-            if (pipelineRes.success) setPipeline((pipelineRes.pipeline || []).filter((h: any) => h.status !== 'demo_archived'));
+            if (pipelineResp.ok) {
+                const rows = await pipelineResp.json();
+                setPipeline((rows || []).filter((h: any) => h.status !== 'demo_archived'));
+            } else {
+                const pipelineRes = await westflow.getOnboardingPipeline();
+                if (pipelineRes.success) setPipeline((pipelineRes.pipeline || []).filter((h: any) => h.status !== 'demo_archived'));
+            }
             setActivity(activityRes || []);
             setLastUpdated(0);
         } catch (e) { 
@@ -286,15 +297,21 @@ export const ManagerHub: React.FC = () => {
 
     // ── Export function — lifted from OnboardingJourney so it runs server-side
     // from ManagerHub immediately after countersign. No employee browser needed.
-    const exportOnboardingRecord = async (hireId: string) => {
+    const exportOnboardingRecord = async (hireId: string, prefetchedRecord?: any) => {
         try {
-            const getResp = await fetch(
-                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
-                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
-            );
-            const data = await getResp.json();
-            if (!data || data.length === 0) throw new Error('Hire record not found');
-            const hireRecord = data[0];
+            let hireRecord: any;
+            if (prefetchedRecord) {
+                // Use pre-fetched record to avoid stale read race condition
+                hireRecord = prefetchedRecord;
+            } else {
+                const getResp = await fetch(
+                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
+                    { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+                );
+                const data = await getResp.json();
+                if (!data || data.length === 0) throw new Error('Hire record not found');
+                hireRecord = data[0];
+            }
             const meta = hireRecord.metadata || {};
 
             if (meta.contract_status !== 'countersigned') {
@@ -561,13 +578,16 @@ export const ManagerHub: React.FC = () => {
             if (success) {
                 triggerSuccessFeedback('Contract Countersigned.');
 
-                // ── Step 3: Fire export immediately — no browser dependency ──────
-                // exportOnboardingRecord used to rely on the employee's realtime
-                // listener in OnboardingJourney. Moved here so it always fires
-                // from ManagerHub right after countersign, regardless of whether
-                // the employee's session is open.
+                // ── Step 3: Fire export immediately — pass updated record directly ──
+                // Avoid re-fetching from DB which can return stale pre-patch data
+                // causing the contract_status guard to bail out silently.
                 try {
-                    await exportOnboardingRecord(hire.id);
+                    const prefetchedRecord = {
+                        ...hire,
+                        metadata: updatedMeta,
+                        status: 'COMPLETED',
+                    };
+                    await exportOnboardingRecord(hire.id, prefetchedRecord);
                 } catch (exportErr) {
                     console.warn('[Countersign] Export failed (non-blocking):', exportErr);
                 }
@@ -587,6 +607,8 @@ export const ManagerHub: React.FC = () => {
                 }
 
                 fetchDashboardData();
+                // Optimistic UI update: remove from countersign list immediately
+                setPipeline(prev => prev.map(h => h.id === hire.id ? { ...h, metadata: updatedMeta, status: 'COMPLETED' } : h));
             } else {
                 addToast('Countersign failed — please try again.', 'error');
             }

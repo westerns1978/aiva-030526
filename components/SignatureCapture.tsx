@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle2, Loader2, AlertCircle, Clock } from 'lucide-react';
 import { SignatureStylePicker } from './SignatureStylePicker';
+import { MobilePdfViewer } from './MobilePdfViewer';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SignatureCapture v2 — styled signature picker for AIVA onboarding
@@ -112,7 +113,7 @@ export const SignatureCapture: React.FC<SignatureCaptureProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-hidden">
-                    <iframe src={scrollContentUrl} className="w-full h-full border-0" title={documentTitle} />
+                    <MobilePdfViewer url={scrollContentUrl || ''} className="w-full h-full" title={documentTitle} />
                 </div>
 
                 <div className="px-5 py-4 border-t border-white/10 bg-slate-900 shrink-0">

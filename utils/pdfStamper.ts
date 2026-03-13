@@ -375,7 +375,7 @@ export async function stampEmployeeSignature(
     const pdfBytes = new Uint8Array(await pdfResp.arrayBuffer());
 
     // 2. Load into pdf-lib
-    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
 
     // 3. Embed images
     const sigImage = await embedImage(pdfDoc, params.signatureDataUrl);
@@ -395,7 +395,7 @@ export async function stampEmployeeSignature(
     const hash = await sha256Hex(finalBytes);
 
     // 7. Stamp audit block (requires hash, so second pass)
-    const pdfDoc2 = await PDFDocument.load(finalBytes);
+    const pdfDoc2 = await PDFDocument.load(finalBytes, { ignoreEncryption: true });
     await stampAuditBlock(pdfDoc2, {
       hireId: params.hireId,
       employeeName: params.signerName,
@@ -433,7 +433,7 @@ export async function stampCountersignature(
     const pdfBytes = new Uint8Array(await pdfResp.arrayBuffer());
 
     // 2. Load
-    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
 
     // 3. Stamp Deon on pages 18 + 21
     await stampDeonSigPages(pdfDoc, params.countersignerName, params.countersignedAt);
@@ -443,7 +443,7 @@ export async function stampCountersignature(
     const interimHash = await sha256Hex(interim);
 
     // 5. Update audit block with countersign info (second pass)
-    const pdfDoc2 = await PDFDocument.load(interim);
+    const pdfDoc2 = await PDFDocument.load(interim, { ignoreEncryption: true });
     await stampAuditBlock(pdfDoc2, {
       hireId: params.hireId,
       employeeName: params.employeeName,

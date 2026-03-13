@@ -20,6 +20,8 @@ import { Scan, Signature, Monitor, Loader2, AlertCircle, Zap, CheckCircle2, File
 import jsPDF from 'jspdf';
 import { stampEmployeeSignature } from '../utils/pdfStamper';
 import { SignatureCapture, type SignatureResult } from './SignatureCapture';
+import { StartDatePicker, formatStartDate } from './StartDatePicker';
+import { MobilePdfViewer } from './MobilePdfViewer';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SUPABASE_URL = 'https://ldzzlndsspkyohvzfiiu.supabase.co';
@@ -1050,6 +1052,14 @@ const OnboardingJourney: React.FC = () => {
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     
+    useEffect(() => {
+        const handleBackPress = () => {
+            addToast('Press back again to exit', 'info');
+        };
+        window.addEventListener('aiva-back-press', handleBackPress);
+        return () => window.removeEventListener('aiva-back-press', handleBackPress);
+    }, [addToast]);
+
     // Sticky photo URL state + Ref
     const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(
         currentHire?.metadata?.profile_photo_url || null
@@ -1183,6 +1193,292 @@ const OnboardingJourney: React.FC = () => {
         return () => clearTimeout(timer);
     }, [hydrateState, setKioskMode]);
 
+    const exportOnboardingRecord = async (hireId: string) => {
+        try {
+            // ── 1. Fetch fresh hire record ────────────────────────────────────
+            const getResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
+                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+            );
+            const data = await getResp.json();
+            if (!data || data.length === 0) throw new Error('Hire record not found');
+            const hireRecord = data[0];
+            const meta = hireRecord.metadata || {};
+
+            // Guard: only export once countersigned
+            if (meta.contract_status !== 'countersigned') {
+                console.warn('[export] Skipping — contract not yet countersigned');
+                return;
+            }
+            // Guard: don't double-export
+            if (meta.export_completed) {
+                console.log('[export] Already exported — skipping');
+                return;
+            }
+
+            const empName      = hireRecord.staff_name || 'Employee';
+            const employeeNum  = hireRecord.id.slice(0, 8).toUpperCase();
+
+            // ── 2. Build single Sage HR CSV row ───────────────────────────────
+            const sageRow = {
+                Employee_Number:                    employeeNum,
+                Surname:                            meta.surname || empName.split(' ').slice(1).join(' ') || '',
+                First_Names:                        meta.first_names || empName.split(' ')[0] || '',
+                ID_Number:                          meta.identity_number || '',
+                Date_Of_Birth:                      meta.date_of_birth || '',
+                Residency_Status:                   meta.residency_status || '',
+                Race_EEA:                           meta.race || '',
+                Drivers_Licence:                    meta.drivers_licence_number || '',
+                Cell_Number:                        hireRecord.phone || meta.cell_number || '',
+                Email:                              meta.email_address || '',
+                Street_Address:                     meta.home_address_line_1 || '',
+                Suburb:                             meta.home_address_suburb || '',
+                City:                               meta.home_address_city || '',
+                Province:                           meta.home_address_province || '',
+                Postal_Code:                        meta.postal_code || '',
+                Bank_Name:                          meta.bank_name || '',
+                Branch_Name:                        meta.branch_name || '',
+                Branch_Code:                        meta.branch_code || '',
+                Account_Number:                     meta.account_number || '',
+                Account_Type:                       meta.account_type || '',
+                Account_Holder:                     meta.account_holder_name || empName,
+                Emergency_Contact_Name:             meta.emergency_contact_name || '',
+                Emergency_Contact_Phone:            meta.emergency_contact_phone || '',
+                Emergency_Contact_Relationship:     meta.emergency_contact_relationship || '',
+                Tax_Number:                         meta.income_tax_number || '',
+                Start_Date:                         meta.start_date || new Date().toISOString().split('T')[0],
+                Position:                           meta.job_description || 'Sales Executive',
+                Department:                         'Sales',
+                Branch:                             meta.branch || 'Nashua Paarl & West Coast',
+                Employment_Status:                  'Active',
+                Contract_Status:                    'Countersigned',
+                Countersigned_By:                   meta.countersigner_name || 'Deon Boshoff',
+                Countersigned_At:                   meta.countersigned_at || new Date().toISOString(),
+                Onboarding_Completed_At:            new Date().toISOString(),
+                AIVA_Hire_ID:                       hireRecord.id,
+            };
+
+            // Single file — fixed path so it upserts and never duplicates
+            const csvContent = [
+                Object.keys(sageRow).join(','),
+                Object.values(sageRow).map(v => `"${String(v ?? '').replace(/"/g, '\'\'')}"`).join(','),
+            ].join('\n');
+
+            // ── 3. Upload single Sage CSV ──────────────────────────────────────
+            const csvPath = `hr-exports/${hireId}/sage_export.csv`;
+            await fetch(
+                `${SUPABASE_URL}/storage/v1/object/project-aiva-afridroids/${csvPath}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'text/csv',
+                        'x-upsert': 'true',
+                    },
+                    body: new Blob([csvContent], { type: 'text/csv' }),
+                }
+            );
+
+            // ── 4. Register countersigned PDF in uploaded_files vault ──────────
+            const finalPdfUrl = meta.countersigned_pdf_url
+                || (meta.countersigned_pdf_path
+                    ? `${SUPABASE_URL}/storage/v1/object/public/project-aiva-afridroids/${meta.countersigned_pdf_path}`
+                    : meta.signed_pdf_url || null);
+
+            if (finalPdfUrl) {
+                try {
+                    await fetch(`${SUPABASE_URL}/rest/v1/uploaded_files`, {
+                        method: 'POST',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal',
+                        },
+                        body: JSON.stringify({
+                            file_name:       `Employment_Contract_Countersigned_${empName.replace(/\s+/g, '_')}.pdf`,
+                            file_path:       meta.countersigned_pdf_path || `contracts/${hireId}/final`,
+                            file_type:       'application/pdf',
+                            file_size:       0,
+                            public_url:      finalPdfUrl,
+                            hire_id:         hireId,
+                            app_id:          'aiva',
+                            document_type:   'countersigned_contract',
+                            document_status: 'countersigned',
+                            uploaded_by:     'aiva-export',
+                            uploaded_at:     new Date().toISOString(),
+                        }),
+                    });
+                    console.log('[export] ✅ Countersigned PDF registered in uploaded_files');
+                } catch (vaultErr) {
+                    console.warn('[export] uploaded_files registration failed (non-blocking):', vaultErr);
+                }
+            }
+
+            // ── 5. Write export_completed to metadata ─────────────────────────
+            const freshMetaResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
+                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+            );
+            const freshMetaData = await freshMetaResp.json();
+            const existingMeta  = freshMetaData?.[0]?.metadata || {};
+
+            await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({
+                    metadata: {
+                        ...existingMeta,
+                        sage_csv_path:       csvPath,
+                        final_pdf_url:       finalPdfUrl,
+                        export_completed:    true,
+                        export_completed_at: new Date().toISOString(),
+                    },
+                    status: 'COMPLETED',
+                }),
+            });
+
+            // ── 6. Log to hr_export_log ────────────────────────────────────────
+            await fetch(`${SUPABASE_URL}/rest/v1/hr_export_log`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal',
+                },
+                body: JSON.stringify({
+                    hire_id:       hireId,
+                    exported_at:   new Date().toISOString(),
+                    target_system: 'sage_hr',
+                    status:        'pending_sync',
+                    payload:       sageRow,
+                    csv_path:      csvPath,
+                }),
+            });
+
+            // ── 7. WhatsApp to EMPLOYEE with final PDF download link ───────────
+            const employeePhone = hireRecord.phone?.replace(/\D/g, '');
+            const firstName     = empName.split(' ')[0];
+            if (employeePhone) {
+                const employeeMsg = [
+                    `🎉 *Welcome to Nashua Paarl, ${firstName}!*`,
+                    ``,
+                    `Your employment contract has been countersigned by the Managing Director. You are officially onboard!`,
+                    ``,
+                    `📄 *Your signed contract:*`,
+                    finalPdfUrl || `Log in to AIVA to download your documents.`,
+                    ``,
+                    `Your start date: *${sageRow.Start_Date}*`,
+                    `Position: *${sageRow.Position}*`,
+                    ``,
+                    `Welcome to the team! 🚀`,
+                ].join('\n');
+                try {
+                    await westflow.sendWhatsAppNotification(employeePhone, employeeMsg);
+                    console.log('[export] ✅ Employee WhatsApp sent');
+                } catch (waErr) {
+                    console.warn('[export] Employee WhatsApp failed:', waErr);
+                }
+            }
+
+            // ── 8. WhatsApp to manager group ───────────────────────────────────
+            try {
+                await westflow.sendWhatsAppNotification(
+                    '120363423479055395@g.us',
+                    [
+                        `✅ *Onboarding Complete — ${empName}*`,
+                        ``,
+                        `📋 Role: ${sageRow.Position}`,
+                        `🏢 Branch: ${sageRow.Branch}`,
+                        `📄 Contract: Countersigned ✅`,
+                        `👤 Ref: ${employeeNum}`,
+                        ``,
+                        `Sage HR import file is ready.`,
+                    ].join('\n')
+                );
+            } catch (waErr) {
+                console.warn('[export] Manager group WhatsApp failed:', waErr);
+            }
+
+            console.log('[export] ✅ Complete — 1 CSV, PDF vaulted, WhatsApp sent');
+
+        } catch (error) {
+            console.error('[exportOnboardingRecord] Error:', error);
+        }
+    };
+
+    const handleFinalize = useCallback(async () => {
+        setSyncStatus('SYNCING');
+        try {
+            if (hireId && UUID_REGEX.test(hireId)) {
+                // Advance step to 7 (completed) and mark status COMPLETED
+                await westflow.advanceOnboardingStep(hireId, 7);
+                await fetch(
+                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify({
+                            status: 'COMPLETED',
+                            step_reached: 7
+                        })
+                    }
+                );
+            }
+            // Stop timer and record duration
+            if (timerRef.current) clearInterval(timerRef.current);
+            const durationSecs = onboardingStartTime ? Math.floor((Date.now() - onboardingStartTime) / 1000) : elapsedSeconds;
+            if (hireId && UUID_REGEX.test(hireId) && durationSecs > 0) {
+                try {
+                    const getR = await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
+                        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+                    const rows = await getR.json();
+                    const freshMeta = rows?.[0]?.metadata || {};
+                    await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
+                        method: 'PATCH',
+                        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+                        body: JSON.stringify({ metadata: { ...freshMeta, onboarding_duration_seconds: durationSecs } })
+                    });
+                } catch (e) { console.warn('[timer] duration save failed', e); }
+            }
+            setCompletedSteps(prev => prev.includes('step7') ? prev : [...prev, 'step7']);
+            setShowWelcome(true);
+            triggerSuccessFeedback("Welcome to Nashua! 🎉");
+            
+            if (hireId && UUID_REGEX.test(hireId)) {
+                const meta = currentHire?.metadata || {};
+                if (!meta.export_completed) {
+                    await exportOnboardingRecord(hireId);
+                }
+                // Generate employee PDF packet with duration
+                setTimeout(() => {
+                    const finalMeta = { ...meta, onboarding_duration_seconds: durationSecs };
+                    generateCompletionPDF(finalMeta, identifiedName || 'Employee', hireId);
+                }, 1500);
+            }
+
+            // Clear localStorage so stale hireId doesn't affect future sessions
+            try { localStorage.removeItem('aiva-active-hire-id'); } catch { /* Ignore storage errors */ }
+        } catch (e) {
+            console.error('[OnboardingJourney] Finalize error:', e);
+            addToast("Failed to finalize. Please try again.", "error");
+        } finally {
+            setSyncStatus('IDLE');
+        }
+    }, [hireId, currentHire, identifiedName, onboardingStartTime, elapsedSeconds, triggerSuccessFeedback, addToast]);
+
     useEffect(() => {
         if (hireId && completedSteps.length >= 5) { // Listen from step 6 onwards — catch countersign at any point
             const checkContractStatus = async () => {
@@ -1210,7 +1506,7 @@ const OnboardingJourney: React.FC = () => {
                         return steps;
                     });
                     // Fire export after short delay to let state settle
-                    setTimeout(() => exportOnboardingRecord(hireId), 1500);
+                    setTimeout(() => handleFinalize(), 1500);
                 }
             };
 
@@ -1226,7 +1522,7 @@ const OnboardingJourney: React.FC = () => {
             
             return () => unsubscribe();
         }
-    }, [completedSteps.length, hireId, setCurrentHire]);
+    }, [completedSteps.length, hireId, setCurrentHire, handleFinalize]);
 
     useEffect(() => {
         if (showFinalReview || showWelcome) {
@@ -1332,83 +1628,85 @@ const OnboardingJourney: React.FC = () => {
                 // This is what makes the countersign list populate on the manager side.
                 if (stepNum === 7) {
                     try {
-                        // Fetch fresh metadata to avoid overwriting other fields
-                        const getR = await fetch(
-                            `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
-                            { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
-                        );
-                        const rows = await getR.json();
-                        const freshMeta = rows?.[0]?.metadata || {};
-
-                        // Write signed status to metadata
-                        await fetch(
-                            `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
-                            {
-                                method: 'PATCH',
-                                headers: {
-                                    'apikey': SUPABASE_KEY,
-                                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                                    'Content-Type': 'application/json',
-                                    'Prefer': 'return=minimal'
-                                },
-                                body: JSON.stringify({
-                                    metadata: {
-                                        ...freshMeta,
-                                        contract_status: 'signed',
-                                        contract_signed_at: new Date().toISOString(),
-                                        contract_signed_by: identifiedName || currentHire?.staff_name || 'Employee'
-                                    }
-                                })
-                            }
-                        );
-                        console.log('[Step7] ✅ contract_status set to "signed" in metadata');
-
-                        // Notify WhatsApp group — "ready to countersign"
+                        // contract_status: 'signed' is already written by handleStepExecution
+                        // before stampEmployeeSignature runs — don't overwrite here to avoid
+                        // clobbering signed_pdf_url that the stamp just wrote.
+                        // Only send WhatsApp notification.
                         const GROUP_JID = '120363423479055395@g.us';
                         const empName = (identifiedName || currentHire?.staff_name || 'Team Member').split(' ')[0];
-                        await westflow.sendWhatsAppNotification(
-                            GROUP_JID,
-                            `✍️ ${empName} has signed their employment contract — ready for countersignature.`
-                        );
+                        // Use westflow.call directly — bypass normalizeSAPhone which mangles group JIDs
+                        await westflow.call('AIVA', 'send_whatsapp_notification', {
+                            phone: GROUP_JID,
+                            message: `✍️ ${empName} has signed their employment contract — ready for countersignature.`
+                        });
                         console.log('[Step7] ✅ WhatsApp group notified');
                     } catch (contractErr) {
-                        console.warn('[Step7] Contract status write or WhatsApp failed:', contractErr);
-                        // Don't block the flow — the step can still advance
+                        console.warn('[Step7] WhatsApp notification failed (non-blocking):', contractErr);
                     }
                 }
                 // ─── END PATCH ────────────────────────────────────────────────────
 
-                await westflow.advanceOnboardingStep(hireId, stepNum + 1);
+                // Write step_reached directly to Supabase FIRST as safety net.
+                // westflow.advanceOnboardingStep can throw — if it does, step_reached
+                // is already persisted so reload restores correct position.
+                await fetch(
+                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify({ step_reached: stepNum + 1 })
+                    }
+                );
+                // Also fire westflow advance (best-effort, non-blocking)
+                try {
+                    await westflow.advanceOnboardingStep(hireId, stepNum + 1);
+                } catch (wfErr) {
+                    console.warn('[OnboardingJourney] westflow.advanceOnboardingStep failed (non-blocking, step_reached already written):', wfErr);
+                }
                 
                 // Send per-step WhatsApp to employee (skip step 7 — handled above via group)
                 if (currentHire?.phone && stepNum !== 7) {
-                    const cleanPhone = currentHire.phone.replace(/\D/g, '');
-                    const name = (identifiedName || 'Team Member').split(' ')[0];
-                    const stepMessages = [
-                      `✅ ${name}, your employment offer has been accepted.`,
-                      `✅ ${name}, your ID has been verified.`,
-                      `✅ ${name}, your proof of address has been submitted.`,
-                      `✅ ${name}, your banking details have been saved.`,
-                      `✅ ${name}, your policy acknowledgments are complete.`,
-                      `✅ ${name}, your benefits setup is complete.`,
-                      `🎉 Welcome ${name}! You are now fully onboarded. Welcome to Nashua!`
-                    ];
-                    await westflow.sendWhatsAppNotification(cleanPhone, stepMessages[stepNum - 1]);
+                    try {
+                        // Use westflow.call directly to avoid double-normalization
+                        // (phone already stored normalized in Supabase)
+                        const rawPhone = currentHire.phone.replace(/\D/g, '');
+                        const name = (identifiedName || 'Team Member').split(' ')[0];
+                        const stepMessages = [
+                          `✅ ${name}, your employment offer has been accepted.`,
+                          `✅ ${name}, your ID has been verified.`,
+                          `✅ ${name}, your proof of address has been submitted.`,
+                          `✅ ${name}, your banking details have been saved.`,
+                          `✅ ${name}, your policy acknowledgments are complete.`,
+                          `✅ ${name}, your benefits setup is complete.`,
+                          `🎉 Welcome ${name}! You are now fully onboarded. Welcome to Nashua!`
+                        ];
+                        await westflow.call('AIVA', 'send_whatsapp_notification', {
+                            phone: rawPhone,
+                            message: stepMessages[stepNum - 1]
+                        });
+                        console.log(`[WhatsApp] ✅ Step ${stepNum} notification sent to ${rawPhone}`);
+                    } catch (waErr) {
+                        console.warn(`[WhatsApp] Step ${stepNum} notification failed (non-blocking):`, waErr);
+                    }
                 }
             }
         } catch (e) {
-            console.warn('[OnboardingJourney] Step sync error:', e);
-            // Roll back optimistic update and flag for retry
-            setCompletedSteps(completedSteps);
+            console.warn('[OnboardingJourney] Step sync error (non-blocking — keeping optimistic UI):', e);
+            // DO NOT roll back completedSteps — metadata writes already succeeded before this throw.
+            // Rolling back causes the employee to see the step as incomplete and repeat it.
+            // Flag for background retry instead.
             setSyncFailed(true);
             setPendingStepId(stepId);
             setSyncStatus('IDLE');
-            return;
+            // Don't return — fall through to clear flags below
         } finally {
-            if (!syncFailed) {
-                setSyncStatus('PERSISTENT');
-                setTimeout(() => setSyncStatus('IDLE'), 2000);
-            }
+            setSyncStatus('PERSISTENT');
+            setTimeout(() => setSyncStatus('IDLE'), 2000);
         }
         setSyncFailed(false);
         setPendingStepId(null);
@@ -1442,24 +1740,33 @@ const OnboardingJourney: React.FC = () => {
     const handlePacketComplete = async (metadataUpdate: any) => {
         setShowPolicyPacket(false);
         if (hireId) {
-             await fetch(
-                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
-                {
-                    method: 'PATCH',
-                    headers: {
-                        'apikey': SUPABASE_KEY,
-                        'Authorization': `Bearer ${SUPABASE_KEY}`,
-                        'Content-Type': 'application/json',
-                        'Prefer': 'return=minimal'
-                    },
-                    body: JSON.stringify({
-                        metadata: {
-                            ...currentHire?.metadata,
-                            ...metadataUpdate
-                        }
-                    })
-                }
-            );
+            // Fetch fresh metadata first — avoids clobbering fields written
+            // after this component rendered (e.g. signed_pdf_url from stamper)
+            try {
+                const getResp = await fetch(
+                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
+                    { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+                );
+                const rows = await getResp.json();
+                const freshMeta = rows?.[0]?.metadata || {};
+                await fetch(
+                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify({
+                            metadata: { ...freshMeta, ...metadataUpdate }
+                        })
+                    }
+                );
+            } catch (e) {
+                console.warn('[handlePacketComplete] metadata patch failed (non-blocking):', e);
+            }
         }
         await handleStepComplete('step6');
     };
@@ -1516,7 +1823,7 @@ const OnboardingJourney: React.FC = () => {
             // ── Terms table ───────────────────────────────────────────────
             const position    = meta.job_description || meta.position || 'Sales Consultant';
             const branch      = meta.branch_name || (meta.branch === 'paarl' ? 'Nashua Paarl' : 'Nashua West Coast');
-            const startDate   = meta.start_date || new Date().toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' });
+            const startDate   = meta.start_date ? formatStartDate(meta.start_date) : new Date().toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' });
             const reportingTo = meta.reporting_to || 'Deon Boshoff (MD)';
 
             const tableRows = [
@@ -1772,292 +2079,6 @@ const OnboardingJourney: React.FC = () => {
         }
     };
 
-    const exportOnboardingRecord = async (hireId: string) => {
-        try {
-            // ── 1. Fetch fresh hire record ────────────────────────────────────
-            const getResp = await fetch(
-                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
-                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
-            );
-            const data = await getResp.json();
-            if (!data || data.length === 0) throw new Error('Hire record not found');
-            const hireRecord = data[0];
-            const meta = hireRecord.metadata || {};
-
-            // Guard: only export once countersigned
-            if (meta.contract_status !== 'countersigned') {
-                console.warn('[export] Skipping — contract not yet countersigned');
-                return;
-            }
-            // Guard: don't double-export
-            if (meta.export_completed) {
-                console.log('[export] Already exported — skipping');
-                return;
-            }
-
-            const empName      = hireRecord.staff_name || 'Employee';
-            const employeeNum  = hireRecord.id.slice(0, 8).toUpperCase();
-
-            // ── 2. Build single Sage HR CSV row ───────────────────────────────
-            const sageRow = {
-                Employee_Number:                    employeeNum,
-                Surname:                            meta.surname || empName.split(' ').slice(1).join(' ') || '',
-                First_Names:                        meta.first_names || empName.split(' ')[0] || '',
-                ID_Number:                          meta.identity_number || '',
-                Date_Of_Birth:                      meta.date_of_birth || '',
-                Residency_Status:                   meta.residency_status || '',
-                Race_EEA:                           meta.race || '',
-                Drivers_Licence:                    meta.drivers_licence_number || '',
-                Cell_Number:                        hireRecord.phone || meta.cell_number || '',
-                Email:                              meta.email_address || '',
-                Street_Address:                     meta.home_address_line_1 || '',
-                Suburb:                             meta.home_address_suburb || '',
-                City:                               meta.home_address_city || '',
-                Province:                           meta.home_address_province || '',
-                Postal_Code:                        meta.postal_code || '',
-                Bank_Name:                          meta.bank_name || '',
-                Branch_Name:                        meta.branch_name || '',
-                Branch_Code:                        meta.branch_code || '',
-                Account_Number:                     meta.account_number || '',
-                Account_Type:                       meta.account_type || '',
-                Account_Holder:                     meta.account_holder_name || empName,
-                Emergency_Contact_Name:             meta.emergency_contact_name || '',
-                Emergency_Contact_Phone:            meta.emergency_contact_phone || '',
-                Emergency_Contact_Relationship:     meta.emergency_contact_relationship || '',
-                Tax_Number:                         meta.income_tax_number || '',
-                Start_Date:                         meta.start_date || new Date().toISOString().split('T')[0],
-                Position:                           meta.job_description || 'Sales Executive',
-                Department:                         'Sales',
-                Branch:                             meta.branch || 'Nashua Paarl & West Coast',
-                Employment_Status:                  'Active',
-                Contract_Status:                    'Countersigned',
-                Countersigned_By:                   meta.countersigner_name || 'Deon Boshoff',
-                Countersigned_At:                   meta.countersigned_at || new Date().toISOString(),
-                Onboarding_Completed_At:            new Date().toISOString(),
-                AIVA_Hire_ID:                       hireRecord.id,
-            };
-
-            // Single file — fixed path so it upserts and never duplicates
-            const csvContent = [
-                Object.keys(sageRow).join(','),
-                Object.values(sageRow).map(v => `"${String(v ?? '').replace(/"/g, '\'\'')}"`).join(','),
-            ].join('\n');
-
-            // ── 3. Upload single Sage CSV ──────────────────────────────────────
-            const csvPath = `hr-exports/${hireId}/sage_export.csv`;
-            await fetch(
-                `${SUPABASE_URL}/storage/v1/object/project-aiva-afridroids/${csvPath}`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'apikey': SUPABASE_KEY,
-                        'Authorization': `Bearer ${SUPABASE_KEY}`,
-                        'Content-Type': 'text/csv',
-                        'x-upsert': 'true',
-                    },
-                    body: new Blob([csvContent], { type: 'text/csv' }),
-                }
-            );
-
-            // ── 4. Register countersigned PDF in uploaded_files vault ──────────
-            const finalPdfUrl = meta.countersigned_pdf_url
-                || (meta.countersigned_pdf_path
-                    ? `${SUPABASE_URL}/storage/v1/object/public/project-aiva-afridroids/${meta.countersigned_pdf_path}`
-                    : meta.signed_pdf_url || null);
-
-            if (finalPdfUrl) {
-                try {
-                    await fetch(`${SUPABASE_URL}/rest/v1/uploaded_files`, {
-                        method: 'POST',
-                        headers: {
-                            'apikey': SUPABASE_KEY,
-                            'Authorization': `Bearer ${SUPABASE_KEY}`,
-                            'Content-Type': 'application/json',
-                            'Prefer': 'return=minimal',
-                        },
-                        body: JSON.stringify({
-                            file_name:       `Employment_Contract_Countersigned_${empName.replace(/\s+/g, '_')}.pdf`,
-                            file_path:       meta.countersigned_pdf_path || `contracts/${hireId}/final`,
-                            file_type:       'application/pdf',
-                            file_size:       0,
-                            public_url:      finalPdfUrl,
-                            hire_id:         hireId,
-                            app_id:          'aiva',
-                            document_type:   'countersigned_contract',
-                            document_status: 'countersigned',
-                            uploaded_by:     'aiva-export',
-                            uploaded_at:     new Date().toISOString(),
-                        }),
-                    });
-                    console.log('[export] ✅ Countersigned PDF registered in uploaded_files');
-                } catch (vaultErr) {
-                    console.warn('[export] uploaded_files registration failed (non-blocking):', vaultErr);
-                }
-            }
-
-            // ── 5. Write export_completed to metadata ─────────────────────────
-            const freshMetaResp = await fetch(
-                `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
-                { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
-            );
-            const freshMetaData = await freshMetaResp.json();
-            const existingMeta  = freshMetaData?.[0]?.metadata || {};
-
-            await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
-                method: 'PATCH',
-                headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal',
-                },
-                body: JSON.stringify({
-                    metadata: {
-                        ...existingMeta,
-                        sage_csv_path:       csvPath,
-                        final_pdf_url:       finalPdfUrl,
-                        export_completed:    true,
-                        export_completed_at: new Date().toISOString(),
-                    },
-                    status: 'COMPLETED',
-                }),
-            });
-
-            // ── 6. Log to hr_export_log ────────────────────────────────────────
-            await fetch(`${SUPABASE_URL}/rest/v1/hr_export_log`, {
-                method: 'POST',
-                headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal',
-                },
-                body: JSON.stringify({
-                    hire_id:       hireId,
-                    exported_at:   new Date().toISOString(),
-                    target_system: 'sage_hr',
-                    status:        'pending_sync',
-                    payload:       sageRow,
-                    csv_path:      csvPath,
-                }),
-            });
-
-            // ── 7. WhatsApp to EMPLOYEE with final PDF download link ───────────
-            const employeePhone = hireRecord.phone?.replace(/\D/g, '');
-            const firstName     = empName.split(' ')[0];
-            if (employeePhone) {
-                const employeeMsg = [
-                    `🎉 *Welcome to Nashua Paarl, ${firstName}!*`,
-                    ``,
-                    `Your employment contract has been countersigned by the Managing Director. You are officially onboard!`,
-                    ``,
-                    `📄 *Your signed contract:*`,
-                    finalPdfUrl || `Log in to AIVA to download your documents.`,
-                    ``,
-                    `Your start date: *${sageRow.Start_Date}*`,
-                    `Position: *${sageRow.Position}*`,
-                    ``,
-                    `Welcome to the team! 🚀`,
-                ].join('\n');
-                try {
-                    await westflow.sendWhatsAppNotification(employeePhone, employeeMsg);
-                    console.log('[export] ✅ Employee WhatsApp sent');
-                } catch (waErr) {
-                    console.warn('[export] Employee WhatsApp failed:', waErr);
-                }
-            }
-
-            // ── 8. WhatsApp to manager group ───────────────────────────────────
-            try {
-                await westflow.sendWhatsAppNotification(
-                    '120363423479055395@g.us',
-                    [
-                        `✅ *Onboarding Complete — ${empName}*`,
-                        ``,
-                        `📋 Role: ${sageRow.Position}`,
-                        `🏢 Branch: ${sageRow.Branch}`,
-                        `📄 Contract: Countersigned ✅`,
-                        `👤 Ref: ${employeeNum}`,
-                        ``,
-                        `Sage HR import file is ready.`,
-                    ].join('\n')
-                );
-            } catch (waErr) {
-                console.warn('[export] Manager group WhatsApp failed:', waErr);
-            }
-
-            console.log('[export] ✅ Complete — 1 CSV, PDF vaulted, WhatsApp sent');
-
-        } catch (error) {
-            console.error('[exportOnboardingRecord] Error:', error);
-        }
-    };
-
-    const handleFinalize = async () => {
-        setSyncStatus('SYNCING');
-        try {
-            if (hireId && UUID_REGEX.test(hireId)) {
-                // Advance step to 7 (completed) and mark status COMPLETED
-                await westflow.advanceOnboardingStep(hireId, 7);
-                await fetch(
-                    `${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`,
-                    {
-                        method: 'PATCH',
-                        headers: {
-                            'apikey': SUPABASE_KEY,
-                            'Authorization': `Bearer ${SUPABASE_KEY}`,
-                            'Content-Type': 'application/json',
-                            'Prefer': 'return=minimal'
-                        },
-                        body: JSON.stringify({
-                            status: 'COMPLETED',
-                            step_reached: 7
-                        })
-                    }
-                );
-            }
-            // Stop timer and record duration
-            if (timerRef.current) clearInterval(timerRef.current);
-            const durationSecs = onboardingStartTime ? Math.floor((Date.now() - onboardingStartTime) / 1000) : elapsedSeconds;
-            if (hireId && UUID_REGEX.test(hireId) && durationSecs > 0) {
-                try {
-                    const getR = await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}&select=metadata`,
-                        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
-                    const rows = await getR.json();
-                    const freshMeta = rows?.[0]?.metadata || {};
-                    await fetch(`${SUPABASE_URL}/rest/v1/onboarding_telemetry?id=eq.${hireId}`, {
-                        method: 'PATCH',
-                        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-                        body: JSON.stringify({ metadata: { ...freshMeta, onboarding_duration_seconds: durationSecs } })
-                    });
-                } catch (e) { console.warn('[timer] duration save failed', e); }
-            }
-            setCompletedSteps(prev => prev.includes('step7') ? prev : [...prev, 'step7']);
-            setShowWelcome(true);
-            triggerSuccessFeedback("Welcome to Nashua! 🎉");
-            
-            if (hireId && UUID_REGEX.test(hireId)) {
-                const meta = currentHire?.metadata || {};
-                if (!meta.export_completed) {
-                    await exportOnboardingRecord(hireId);
-                }
-                // Generate employee PDF packet with duration
-                setTimeout(() => {
-                    const finalMeta = { ...meta, onboarding_duration_seconds: durationSecs };
-                    generateCompletionPDF(finalMeta, identifiedName || 'Employee', hireId);
-                }, 1500);
-            }
-
-            // Clear localStorage so stale hireId doesn't affect future sessions
-            try { localStorage.removeItem('aiva-active-hire-id'); } catch { /* Ignore storage errors */ }
-        } catch (e) {
-            console.error('[OnboardingJourney] Finalize error:', e);
-            addToast("Failed to finalize. Please try again.", "error");
-        } finally {
-            setSyncStatus('IDLE');
-        }
-    };
-
     useEffect(() => {
         (window as any).__AivaOnboarding = { 
             completeStep: (id: string) => handleStepComplete(id),
@@ -2141,7 +2162,7 @@ const OnboardingJourney: React.FC = () => {
                     // This ensures signed_pdf_path is written before Deon's
                     // countersign panel can load the correct source document.
                     addToast('Stamping your signature onto the contract...', 'info');
-                    const contractUrl = `${GCS_REGISTRY.BASE_URL}${currentStep.template}`;
+                    const contractUrl = currentHire?.metadata?.offer_pdf_url || (currentStep.template ? `${GCS_REGISTRY.BASE_URL}${currentStep.template}` : null) || 'https://storage.googleapis.com/gemynd-public/projects/aiva/Employment%20Contract%20Template_3.pdf';
                     try {
                         const result = await stampEmployeeSignature({
                             hireId,
@@ -2324,49 +2345,86 @@ const OnboardingJourney: React.FC = () => {
                     showInitials={true}
                     onComplete={(sig: SignatureResult) => {
                         setShowSignCapture(false);
+                        const isStep7 = currentStep?.id === 'step7';
 
-                        // ── Persist offer signature immediately ─────────────────────────
-                        // These same values will be reused automatically at Step 7
-                        saveFormDataToMetadata({
-                            signature_method: sig.method || 'drawn',
-                            offer_signature_url: sig.signatureDataUrl,
-                            offer_initials: sig.initials,
-                            offer_signed_at: sig.timestamp,
-                            offer_signed_by: sig.signerName,
+                        // ── Persist signature fields ────────────────────────────────────
+                        const baseFields: Record<string, any> = {
+                            signature_method:       sig.method || 'drawn',
+                            offer_signature_url:    sig.signatureDataUrl,
+                            offer_initials:         sig.initials,
+                            offer_signed_at:        sig.timestamp,
+                            offer_signed_by:        sig.signerName,
                             // Mirror to contract fields so Step 7 stamper can access them
                             contract_signature_url: sig.signatureDataUrl,
-                            contract_initials: sig.initials,
-                        });
+                            contract_initials:      sig.initials,
+                        };
+                        // If this IS step7, also write contract_status immediately
+                        if (isStep7) {
+                            baseFields.contract_signed_at  = sig.timestamp;
+                            baseFields.contract_signed_by  = sig.signerName;
+                            baseFields.contract_status     = 'signed';
+                        }
+                        saveFormDataToMetadata(baseFields);
 
                         handleStepComplete(currentStep.id);
 
-                        // ── Stamp offer PDF with signature ──────────────────────────────
-                        const offerSourceUrl = currentHire?.metadata?.offer_pdf_url
-                            || `${GCS_REGISTRY.BASE_URL}${currentStep.template}`;
-                        stampEmployeeSignature({
-                            hireId,
-                            sourcePdfUrl: offerSourceUrl,
-                            signatureDataUrl: sig.signatureDataUrl,
-                            initialsDataUrl: sig.initials,
-                            signerName: sig.signerName,
-                            signedAt: sig.timestamp,
-                            signatureMethod: sig.method || 'drawn',
-                        }).then(result => {
-                            if (result.success) {
-                                console.log('[pdfStamper] Offer stamped →', result.pdfUrl);
-                                saveFormDataToMetadata({
-                                    offer_signed_pdf_url: result.pdfUrl,
-                                    offer_signed_pdf_path: result.storagePath,
-                                    offer_document_hash: result.documentHash,
-                                });
-                            } else {
-                                console.warn('[pdfStamper] Offer stamp failed:', result.error);
-                                saveFormDataToMetadata({ offer_stamp_error: result.error });
-                            }
-                        }).catch(err => {
-                            console.error('[pdfStamper] Offer stamp error:', err);
-                            saveFormDataToMetadata({ offer_stamp_error: String(err) });
-                        });
+                        if (isStep7) {
+                            // ── Step 7: stamp contract PDF ──────────────────────────────
+                            const contractUrl = 'https://storage.googleapis.com/gemynd-public/projects/aiva/Employment%20Contract%20Template_3.pdf';
+                            stampEmployeeSignature({
+                                hireId,
+                                sourcePdfUrl:     contractUrl,
+                                signatureDataUrl: sig.signatureDataUrl,
+                                initialsDataUrl:  sig.initials || sig.signatureDataUrl,
+                                signerName:       sig.signerName,
+                                signedAt:         sig.timestamp,
+                                signatureMethod:  sig.method || 'drawn',
+                            }).then(result => {
+                                if (result.success) {
+                                    console.log('[pdfStamper] Contract stamped →', result.pdfUrl);
+                                    saveFormDataToMetadata({
+                                        signed_pdf_url:         result.pdfUrl,
+                                        signed_pdf_path:        result.storagePath,
+                                        contract_document_hash: result.documentHash,
+                                        stamp_completed_at:     new Date().toISOString(),
+                                    });
+                                } else {
+                                    console.warn('[pdfStamper] Contract stamp failed:', result.error);
+                                    saveFormDataToMetadata({ stamp_error: result.error });
+                                }
+                            }).catch(err => {
+                                console.error('[pdfStamper] Contract stamp error:', err);
+                                saveFormDataToMetadata({ stamp_error: String(err) });
+                            });
+                        } else {
+                            // ── Step 1: stamp offer PDF ─────────────────────────────────
+                            const offerSourceUrl = currentHire?.metadata?.offer_pdf_url
+                                || `${GCS_REGISTRY.BASE_URL}${currentStep.template}`;
+                            stampEmployeeSignature({
+                                hireId,
+                                sourcePdfUrl:     offerSourceUrl,
+                                signatureDataUrl: sig.signatureDataUrl,
+                                initialsDataUrl:  sig.initials || sig.signatureDataUrl,
+                                signerName:       sig.signerName,
+                                signedAt:         sig.timestamp,
+                                signatureMethod:  sig.method || 'drawn',
+                            }).then(result => {
+                                if (result.success) {
+                                    console.log('[pdfStamper] Offer stamped →', result.pdfUrl);
+                                    saveFormDataToMetadata({
+                                        offer_signed_pdf_url:  result.pdfUrl,
+                                        offer_signed_pdf_path: result.storagePath,
+                                        offer_document_hash:   result.documentHash,
+                                    });
+                                } else {
+                                    console.warn('[pdfStamper] Offer stamp failed:', result.error);
+                                    saveFormDataToMetadata({ offer_stamp_error: result.error });
+                                }
+                            }).catch(err => {
+                                console.error('[pdfStamper] Offer stamp error:', err);
+                                saveFormDataToMetadata({ offer_stamp_error: String(err) });
+                            });
+                        }
                     }}
                     onCancel={() => setShowSignCapture(false)}
                 />
@@ -2534,8 +2592,8 @@ const OnboardingJourney: React.FC = () => {
                         <div className="flex-1 mx-6 rounded-2xl overflow-hidden border border-slate-100 dark:border-white/10 min-h-0 relative" style={{height: '380px'}}>
                             {currentHire?.metadata?.job_description_url ? (
                                 <>
-                                    <iframe
-                                        src={currentHire.metadata.job_description_url}
+                                    <MobilePdfViewer
+                                        url={currentHire.metadata.job_description_url}
                                         className="w-full h-full"
                                         title="Job Description"
                                     />
@@ -2552,6 +2610,13 @@ const OnboardingJourney: React.FC = () => {
                                     No job description PDF available.
                                 </div>
                             )}
+                        </div>
+
+                        <div className="px-8 py-4 shrink-0 border-t border-slate-100 dark:border-white/10">
+                            <StartDatePicker
+                                value={currentHire?.metadata?.start_date}
+                                onChange={(date) => saveFormDataToMetadata({ start_date: date })}
+                            />
                         </div>
 
                         <div className="px-8 py-6 shrink-0 space-y-3">

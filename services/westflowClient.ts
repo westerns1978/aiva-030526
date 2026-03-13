@@ -6,6 +6,21 @@
 
 import { SUPABASE_CONFIG, UUID_REGEX, normalizeSAPhone } from '../constants';
 
+// Smart phone normalizer — only applies SA formatting to SA numbers.
+// Passes through US numbers, group JIDs, and already-normalized numbers unchanged.
+function smartNormalizePhone(phone: string): string {
+    if (!phone) return phone;
+    // Group JIDs (WhatsApp groups) — pass through unchanged
+    if (phone.includes('@')) return phone;
+    const digits = phone.replace(/\D/g, '');
+    // Already a full international number with country code 27 (SA) — pass through
+    if (digits.startsWith('27') && digits.length === 11) return digits;
+    // SA local format: starts with 0, 10 digits — convert to 27xxxxxxxxx
+    if (digits.startsWith('0') && digits.length === 10) return '27' + digits.slice(1);
+    // Anything else (US numbers, other intl) — pass through as-is
+    return digits;
+}
+
 const WESTFLOW_CONFIG = {
   orchestrator: `${SUPABASE_CONFIG.url}/functions/v1/mcp-orchestrator`,
   anonKey: SUPABASE_CONFIG.anonKey,
@@ -97,7 +112,7 @@ export class WestFlowClient {
 
   async sendWhatsAppTemplate(phone: string, templateName: string = 'hello_world', language: string = 'en', components: any[] = []) {
     return this.call('AIVA', 'send_whatsapp_template', {
-      phone: normalizeSAPhone(phone),
+      phone: smartNormalizePhone(phone),
       template_name: templateName,
       language: language,
       components: components
@@ -106,7 +121,7 @@ export class WestFlowClient {
 
   async sendWhatsAppNotification(phone: string, message: string) {
     return this.call('AIVA', 'send_whatsapp_notification', {
-      phone: normalizeSAPhone(phone),
+      phone: smartNormalizePhone(phone),
       message: message
     });
   }

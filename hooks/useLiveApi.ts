@@ -1,3 +1,4 @@
+
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { useAppContext } from '../context/AppContext';
@@ -111,10 +112,6 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
     if (isRecording && withVideo === isVideoActive) return;
     if (isRecording) stopConversation();
 
-    // Request mic/camera — this IS the user gesture that unlocks AudioContext.
-    // AudioContexts must be created inside onopen (below) to stay within the
-    // activation window. Creating them here causes browsers (especially Safari/iOS)
-    // to auto-suspend them before the first audio chunk arrives.
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: true, 
@@ -129,7 +126,20 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
         return;
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: (import.meta as any).env?.VITE_GEMINI_API_KEY || 'AIzaSyDUfGlQmbB9QaRlDtYENAqtSTyDQVD7avs' });
+    const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+    const inputCtx = new AudioCtor({ sampleRate: 16000 });
+    const outputCtx = new AudioCtor({ sampleRate: 24000 });
+    const analyser = inputCtx.createAnalyser();
+    analyser.fftSize = 1024; // Higher resolution for visuals
+    
+    audioContextRefs.current.input = inputCtx;
+    audioContextRefs.current.output = outputCtx;
+    audioContextRefs.current.analyser = analyser;
+
+    if (inputCtx.state === 'suspended') await inputCtx.resume();
+    if (outputCtx.state === 'suspended') await outputCtx.resume();
+
     const systemInstruction = systemInstructionOverride || KIOSK_SYSTEM_INSTRUCTION;
 
     try {
@@ -138,29 +148,6 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
             callbacks: {
                 onopen: () => {
                   if (!mediaStreamRef.current) return;
-
-                  // ── Audio Context Creation ─────────────────────────────────
-                  // Created HERE (inside onopen) not in startConversation above.
-                  // onopen fires synchronously on WebSocket open, still within
-                  // the browser's user-gesture activation window from the
-                  // getUserMedia call. This guarantees both contexts start in
-                  // state === 'running' and audio plays immediately.
-                  // The old code created these before ai.live.connect() which
-                  // meant they were suspended by the time onmessage fired.
-                  const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-                  const inputCtx = new AudioCtor({ sampleRate: 16000 });
-                  const outputCtx = new AudioCtor({ sampleRate: 24000 });
-                  const analyser = inputCtx.createAnalyser();
-                  analyser.fftSize = 1024;
-
-                  audioContextRefs.current.input = inputCtx;
-                  audioContextRefs.current.output = outputCtx;
-                  audioContextRefs.current.analyser = analyser;
-
-                  // Belt-and-suspenders resume — safe to call even if already running
-                  inputCtx.resume().catch(() => {});
-                  outputCtx.resume().catch(() => {});
-
                   const source = inputCtx.createMediaStreamSource(mediaStreamRef.current);
                   const scriptProcessor = inputCtx.createScriptProcessor(2048, 1, 1);
                   audioContextRefs.current.source = source;
@@ -208,7 +195,6 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
                   source.connect(scriptProcessor);
                   scriptProcessor.connect(inputCtx.destination);
                 },
-
                 onmessage: async (message: LiveServerMessage) => {
                     if (message.serverContent?.interrupted) clearPlaybackQueue();
 
@@ -232,36 +218,19 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
                         if (base64Audio) {
                             setIsThinking(false);
                             setIsAivaSpeaking(true);
-
-                            const outputCtx = audioContextRefs.current.output;
-                            if (!outputCtx) return;
-
-                            // ── Resume guard ───────────────────────────────────
-                            // outputCtx can drift back to 'suspended' if the user
-                            // switches tabs, locks their phone, or the browser
-                            // decides to throttle background audio. Without this
-                            // resume, sourceNode.start() fires without error but
-                            // produces no sound — the most common "silent" symptom.
-                            if (outputCtx.state === 'suspended') {
-                                await outputCtx.resume();
-                            }
-
-                            audioPlayback.current.nextStartTime = Math.max(
-                                audioPlayback.current.nextStartTime,
-                                outputCtx.currentTime
-                            );
+                            audioPlayback.current.nextStartTime = Math.max(audioPlayback.current.nextStartTime, outputCtx.currentTime);
                             const audioBuffer = await decodeAudioData(decode(base64Audio), outputCtx, 24000, 1);
                             if (audioBuffer) {
-                                const sourceNode = outputCtx.createBufferSource();
-                                sourceNode.buffer = audioBuffer;
-                                sourceNode.connect(outputCtx.destination);
-                                sourceNode.addEventListener('ended', () => {
-                                    audioPlayback.current.sources.delete(sourceNode);
-                                    if (audioPlayback.current.sources.size === 0) setIsAivaSpeaking(false);
-                                });
-                                sourceNode.start(audioPlayback.current.nextStartTime);
-                                audioPlayback.current.nextStartTime += audioBuffer.duration;
-                                audioPlayback.current.sources.add(sourceNode);
+                            const sourceNode = outputCtx.createBufferSource();
+                            sourceNode.buffer = audioBuffer;
+                            sourceNode.connect(outputCtx.destination);
+                            sourceNode.addEventListener('ended', () => {
+                                audioPlayback.current.sources.delete(sourceNode);
+                                if(audioPlayback.current.sources.size === 0) setIsAivaSpeaking(false);
+                            });
+                            sourceNode.start(audioPlayback.current.nextStartTime);
+                            audioPlayback.current.nextStartTime += audioBuffer.duration;
+                            audioPlayback.current.sources.add(sourceNode);
                             }
                         }
                     }
@@ -275,17 +244,13 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
                     }
 
                     if (message.serverContent?.turnComplete) {
-                        onTurnComplete?.(
-                            transcriptionRefs.current.currentInput.trim() || null,
-                            transcriptionRefs.current.currentOutput.trim() || null
-                        );
+                        onTurnComplete?.(transcriptionRefs.current.currentInput.trim() || null, transcriptionRefs.current.currentOutput.trim() || null);
                         transcriptionRefs.current = { currentInput: '', currentOutput: '' };
                         setIsThinking(false);
                         setLiveUserTranscript('');
                         setLiveModelTranscript('');
                     }
                 },
-
                 onerror: (e) => {
                     console.warn("Live Link Reset:", e);
                     stopConversation();
@@ -296,7 +261,7 @@ export const useLiveApi = ({ onToolCall, onTurnComplete, systemInstructionOverri
                 responseModalities: [Modality.AUDIO],
                 inputAudioTranscription: {},
                 outputAudioTranscription: {},
-                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } },
                 tools: LIVE_AIVA_TOOLS,
                 systemInstruction,
             },
